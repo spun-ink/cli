@@ -37,12 +37,6 @@ your user only — `~/.local/bin`, or `%LOCALAPPDATA%\Programs\spun` on Windows.
 picks a release, `SPUN_INSTALL_DIR` the directory. Read the scripts first if you like:
 [install.sh](scripts/install.sh), [install.ps1](scripts/install.ps1).
 
-**Go 1.27 or later**
-
-```bash
-go install github.com/spun-ink/cli/cmd/spun@latest
-```
-
 **By hand** — download an archive for macOS, Linux or Windows (amd64, arm64) from the
 [releases](https://github.com/spun-ink/cli/releases) page and check it:
 
@@ -52,7 +46,7 @@ shasum -a 256 -c checksums.txt --ignore-missing
 
 The macOS binary is not notarized yet. An archive downloaded with a browser is quarantined, and
 macOS refuses to open it until you run `xattr -d com.apple.quarantine spun` once; the install script
-and `go install` do not need that.
+does not need that.
 
 Every archive carries an SPDX software bill of materials (`*.sbom.json`).
 

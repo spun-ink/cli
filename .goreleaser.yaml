@@ -49,11 +49,9 @@ release:
     irm https://raw.githubusercontent.com/spun-ink/cli/main/scripts/install.ps1 | iex
     ```
 
-    **Go:** `go install github.com/spun-ink/cli/cmd/spun@v{{ .Version }}`
-
     Or download an archive below and check it against `checksums.txt`. The macOS binary is not
     notarized: an archive downloaded with a browser needs `xattr -d com.apple.quarantine spun` once;
-    the install script and `go install` do not.
+    the install scripts do not.
 
     Then `spun signup` for a new account, or `spun login` for an existing one.
 
