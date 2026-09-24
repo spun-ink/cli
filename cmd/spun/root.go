@@ -141,4 +141,5 @@ func (a *app) afterCommand() {
 		return
 	}
 	refreshSkills()
+	checkForUpdate()
 }

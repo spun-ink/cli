@@ -162,14 +162,14 @@ func isolate(t *testing.T) string {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
 	t.Setenv("CODEX_HOME", "")
-	for _, key := range []string{"SPUN_URL", "SPUN_TOKEN", "SPUN_PROFILE"} {
+	for _, key := range []string{"SPUN_URL", "SPUN_TOKEN", "SPUN_PROFILE", "SPUN_NO_UPDATE_CHECK", "CI"} {
 		t.Setenv(key, "")
 	}
 	keyring.MockInit()
 	// Nothing a test runs may reach the live site; a test that wants the default sets it.
-	previous := defaultServer
-	defaultServer = "http://127.0.0.1:1"
-	t.Cleanup(func() { defaultServer = previous })
+	previous, previousReleases := defaultServer, releaseURL
+	defaultServer, releaseURL = "http://127.0.0.1:1", "http://127.0.0.1:1"
+	t.Cleanup(func() { defaultServer, releaseURL = previous, previousReleases })
 	return home
 }
 

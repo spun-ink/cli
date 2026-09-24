@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -63,8 +62,8 @@ func refreshSkills() {
 	if writeJSON(skillStateFile, now) != nil {
 		return
 	}
-	if updated && interactive() {
-		fmt.Fprintf(os.Stderr, "spun skill updated to match spun %s\n", version)
+	if updated {
+		notify("spun skill updated to match spun %s", version)
 	}
 }
 
