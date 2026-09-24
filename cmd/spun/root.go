@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/mod/semver"
 )
 
 // version and buildSource are stamped by GoReleaser: buildSource is "release", or "snapshot" for a
@@ -22,6 +23,13 @@ func init() {
 	if info, ok := debug.ReadBuildInfo(); ok && buildSource == "dev" && strings.HasPrefix(info.Main.Version, "v") {
 		version, buildSource = info.Main.Version, "module"
 	}
+}
+
+// canonicalVersion is s as a full semver version with its leading v — X.Y.Z[-pre], nothing
+// abbreviated and no build metadata — and whether s is one.
+func canonicalVersion(s string) (string, bool) {
+	v := "v" + strings.TrimPrefix(s, "v")
+	return v, semver.IsValid(v) && semver.Canonical(v) == v
 }
 
 // versionLine is what `spun --version` prints; parseVersionLine reads it back from another binary.
@@ -132,4 +140,5 @@ func (a *app) afterCommand() {
 	if !a.ran || a.quiet {
 		return
 	}
+	refreshSkills()
 }

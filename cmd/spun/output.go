@@ -70,6 +70,10 @@ type toolRow struct {
 
 func isTerminal(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }
 
+// interactive: a person reads both streams. Notices go to stderr only then — an agent or a script,
+// which pipes the output, never sees one.
+func interactive() bool { return isTerminal(os.Stdout) && isTerminal(os.Stderr) }
+
 func render(value any, tty bool) string {
 	switch v := value.(type) {
 	case raw:
