@@ -31,6 +31,8 @@ Keep to what is there:
 - The server's error body passes through untouched; the CLI adds codes only for failures the
   server never saw (usage, configuration, network).
 
+Releases are cut by the maintainers: [RELEASING.md](RELEASING.md).
+
 ## Pull requests
 
 One change per pull request, with a test that fails without it. By contributing you agree that
