@@ -185,7 +185,8 @@ Run these in order — the first two need `spun` itself:
    **macOS / Linux**
 
    ```bash
-   rm -f ~/.local/bin/spun ~/.local/bin/.spun.lock ~/.local/bin/.spun-*
+   rm -f ~/.local/bin/spun
+   find ~/.local/bin -maxdepth 1 -name '.spun*' -delete   # lock file and upgrade leftovers
    rm -rf ~/.config/spun              # or $XDG_CONFIG_HOME/spun
    ```
 
