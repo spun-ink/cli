@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime/debug"
 	"strings"
 	"testing"
 
@@ -162,14 +163,14 @@ func isolate(t *testing.T) string {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
 	t.Setenv("CODEX_HOME", "")
-	for _, key := range []string{"SPUN_URL", "SPUN_TOKEN", "SPUN_PROFILE"} {
+	for _, key := range []string{"SPUN_URL", "SPUN_TOKEN", "SPUN_PROFILE", "SPUN_NO_UPDATE_CHECK", "CI"} {
 		t.Setenv(key, "")
 	}
 	keyring.MockInit()
 	// Nothing a test runs may reach the live site; a test that wants the default sets it.
-	previous := defaultServer
-	defaultServer = "http://127.0.0.1:1"
-	t.Cleanup(func() { defaultServer = previous })
+	previous, previousReleases := defaultServer, releaseURL
+	defaultServer, releaseURL = "http://127.0.0.1:1", "http://127.0.0.1:1"
+	t.Cleanup(func() { defaultServer, releaseURL = previous, previousReleases })
 	return home
 }
 
@@ -1097,5 +1098,58 @@ func TestTwoProfilesOnOneServerKeepTheirOwnTokens(t *testing.T) {
 	}
 	if value, f := run(t, "", "--profile", "client", "tools"); f != nil || len(value.(toolTable)) != 1 {
 		t.Fatalf("logout of one profile touched the other: %v, %v", value, f)
+	}
+}
+
+func TestVersionNamesTheBuildSource(t *testing.T) {
+	isolate(t)
+	previous, previousSource := version, buildSource
+	t.Cleanup(func() { version, buildSource = previous, previousSource })
+	for _, source := range []string{"release", "snapshot", "module", "dev"} {
+		version, buildSource = "1.2.3", source
+		var out strings.Builder
+		a := &app{stdin: stdinWith(t, ""), stdout: &out}
+		if _, err := a.run([]string{"--version"}); err != nil {
+			t.Fatal(err)
+		}
+		if want := "spun version 1.2.3 (" + source + ")\n"; out.String() != want {
+			t.Fatalf("got %q, want %q", out.String(), want)
+		}
+		if a.ran {
+			t.Fatal("--version counts as a command run")
+		}
+	}
+}
+
+func TestHelpAndVersionLeaveNoTrace(t *testing.T) {
+	isolate(t)
+	for _, argv := range [][]string{{"--version"}, {"--help"}, {"help"}, {"help", "tools"}, {"tools", "--help"}} {
+		a := &app{stdin: stdinWith(t, ""), stdout: io.Discard}
+		_, _ = a.run(argv)
+		if a.ran && !a.quiet {
+			t.Fatalf("%v would refresh the skill or check for updates", argv)
+		}
+	}
+	a := &app{stdin: stdinWith(t, ""), stdout: io.Discard}
+	_, _ = a.run([]string{"profiles"})
+	if !a.ran || a.quiet {
+		t.Fatal("an ordinary command must run the after-command steps")
+	}
+}
+
+func TestOnlyAModuleBuildCountsAsModule(t *testing.T) {
+	checkout := []debug.BuildSetting{{Key: "vcs", Value: "git"}, {Key: "vcs.revision", Value: "5dc8d4c"}}
+	for name, tc := range map[string]struct {
+		info debug.BuildInfo
+		want bool
+	}{
+		"go install tag":            {debug.BuildInfo{Main: debug.Module{Version: "v1.2.3"}}, true},
+		"go install pseudo-version": {debug.BuildInfo{Main: debug.Module{Version: "v0.1.1-0.20260924135047-5dc8d4c2f6d2"}}, true},
+		"go build in a checkout":    {debug.BuildInfo{Main: debug.Module{Version: "v0.1.1-0.20260924135047-5dc8d4c2f6d2+dirty"}, Settings: checkout}, false},
+		"go run":                    {debug.BuildInfo{Main: debug.Module{Version: "(devel)"}}, false},
+	} {
+		if fromModule(&tc.info) != tc.want {
+			t.Fatalf("%s: want %v", name, tc.want)
+		}
 	}
 }

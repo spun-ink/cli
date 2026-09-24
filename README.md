@@ -50,6 +50,31 @@ does not need that.
 
 Every archive carries an SPDX software bill of materials (`*.sbom.json`).
 
+### Staying current
+
+```bash
+spun upgrade --check                 # the running and the latest version; changes nothing
+spun upgrade                         # to the latest release
+spun upgrade 1.4.0                   # to a named release, prereleases included
+```
+
+`spun upgrade` replaces the binary it runs from, when that is a release installed into your home
+directory (by the install scripts, or an archive unpacked there). The download is checked against
+the release's `checksums.txt`, as the installers do; the old binary stays until the new one answers
+from its place, and is put back if it does not. It never downgrades, never runs as root or
+administrator, and needs no login. Any other install exits 5 (`upgrade_required`) with the command
+that updates it — `go install github.com/spun-ink/cli/cmd/spun@latest` for a `go install` build.
+
+After a command, a release build checks at most once a day whether a newer release exists, and
+says so on stderr — only when both stdout and stderr are a terminal, so an agent or a script never
+sees it (they ask `spun upgrade --check`). It never installs anything. `CI` or
+`SPUN_NO_UPDATE_CHECK=1` turn it off.
+
+The skill follows the binary: after an upgrade or a reinstall, the next command rewrites `SKILL.md`
+wherever `spun setup` put it at an agent's standard location (`~/.claude`, `~/.codex` or
+`$CODEX_HOME`). A skill installed with `spun setup --dir` is refreshed by rerunning that setup, and an
+agent session that has already loaded the skill keeps the old text until it restarts.
+
 ## Getting started
 
 1. **A new account** — sign up from the shell:
@@ -132,8 +157,8 @@ At a terminal output is readable; piped, stdout is JSON. Errors go to stderr as
 | 1 | the tool refused — the body says why |
 | 2 | usage: unknown command, malformed argument, unknown tool or invalid params |
 | 3 | unauthorized: no token, or the server rejected it |
-| 4 | network or protocol failure |
-| 5 | no server named, or local configuration missing |
+| 4 | network or protocol failure, or a failed upgrade (`upgrade_failed`, `upgrade_rolled_back`, `upgrade_broken` — the message says what is installed now) |
+| 5 | no server named, local configuration missing, or this install cannot upgrade itself (`upgrade_required`) |
 
 ## Documentation
 

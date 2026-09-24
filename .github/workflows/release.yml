@@ -46,7 +46,7 @@ jobs:
         run: |
           sh scripts/install.sh
           "$SPUN_INSTALL_DIR/spun" --version | tee version.txt
-          grep -F "${GITHUB_REF_NAME#v}" version.txt
+          grep -Fx "spun version ${GITHUB_REF_NAME#v} (release)" version.txt
       - name: install.ps1
         if: runner.os == 'Windows'
         shell: pwsh
@@ -57,4 +57,37 @@ jobs:
           ./scripts/install.ps1
           $out = & "$env:SPUN_INSTALL_DIR\spun.exe" --version
           $out
-          if (-not ($out -match [regex]::Escape($env:GITHUB_REF_NAME.TrimStart('v')))) { exit 1 }
+          if ($out -ne "spun version $($env:GITHUB_REF_NAME.TrimStart('v')) (release)") { exit 1 }
+      # Upgrades an older release to this one. SPUN_UPGRADE_FROM (a repository variable) names a
+      # release that already has `spun upgrade`; the leg is off until it is set. The target is named,
+      # never "latest": a bare `spun upgrade` skips prereleases and races later tags.
+      - name: spun upgrade
+        if: vars.SPUN_UPGRADE_FROM != '' && runner.os != 'Windows'
+        env:
+          SPUN_VERSION: ${{ vars.SPUN_UPGRADE_FROM }}
+        run: |
+          export SPUN_INSTALL_DIR="$HOME/.local/spun-upgrade"
+          sh scripts/install.sh
+          "$SPUN_INSTALL_DIR/spun" upgrade "$GITHUB_REF_NAME"
+          "$SPUN_INSTALL_DIR/spun" --version | tee version.txt
+          grep -Fx "spun version ${GITHUB_REF_NAME#v} (release)" version.txt
+      - name: spun upgrade
+        if: vars.SPUN_UPGRADE_FROM != '' && runner.os == 'Windows'
+        shell: pwsh
+        env:
+          SPUN_VERSION: ${{ vars.SPUN_UPGRADE_FROM }}
+        run: |
+          $env:SPUN_INSTALL_DIR = Join-Path $env:LOCALAPPDATA 'Programs\spun-upgrade'
+          ./scripts/install.ps1
+          $exe = Join-Path $env:SPUN_INSTALL_DIR 'spun.exe'
+          $result = & $exe upgrade $env:GITHUB_REF_NAME 2>&1
+          $result
+          # A hosted runner may run elevated, which spun upgrade refuses by design.
+          if ($LASTEXITCODE -eq 5 -and "$result" -match 'administrator') {
+            Write-Output '::warning::runner is elevated; spun upgrade refused as designed'
+            exit 0
+          }
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $out = & $exe --version
+          $out
+          if ($out -ne "spun version $($env:GITHUB_REF_NAME.TrimStart('v')) (release)") { exit 1 }

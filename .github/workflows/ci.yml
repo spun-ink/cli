@@ -61,3 +61,4 @@ jobs:
         run: |
           sha256sum -c checksums.txt
           for archive in spun_*.tar.gz spun_*.zip; do test -s "$archive.sbom.json"; done
+          ./spun_linux_amd64_v1/spun --version | grep -E '^spun version .+ \(snapshot\)$'
