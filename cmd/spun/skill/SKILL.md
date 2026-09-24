@@ -15,8 +15,9 @@ through your context.
 
 ## Pick the server first
 
-A command that names no server goes to **https://spun.ink — the live site**, with the token
-`spun login` stored as profile `spun.ink`. Every write there changes the site for the world.
+A command that names no server goes to **https://spun.ink, production**, with the token
+`spun login` stored as profile `spun.ink`. Whether a write there reaches anyone depends on whether
+the site is public yet — see below.
 
 Another server is named with:
 
@@ -78,6 +79,26 @@ spun call update_block id:=42 data:=@hero.json
 ```
 
 `--site <handle>` targets one site of an account with several.
+
+## A site nobody can see yet
+
+A new site is not public. Its root shows an under-construction page, and every other path answers
+404, while **any** of these holds:
+
+- the owner has not yet pressed the button in the confirmation email (`spun call get_account`
+  shows it)
+- the site has no layout template (`update_site layout_template=<key>` wires one)
+- no home page is published
+
+Until then no write has an audience: build templates, settings and the first pages freely, and
+hand the owner a `create_preview_link` URL to look at. The deploy discipline below starts the
+moment the site is public.
+
+## One write per command
+
+Run each write as its own shell command, never chained with `&&` or `;`, and say what it changes
+before you run it. A reviewer — the owner, or a permission check — can approve one small command it
+understands; a chain of four writes reads as one opaque deploy and gets refused.
 
 ## Two kinds of write — know which one you are making
 

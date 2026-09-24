@@ -10,15 +10,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// version is stamped by GoReleaser; `go install …@<version>` reports the module version; any other
-// build says "dev".
-var version = "dev"
+// version and buildSource are stamped by GoReleaser: buildSource is "release", or "snapshot" for a
+// local `goreleaser --snapshot`. `go install …@<version>` reports the module version and counts as
+// "module"; any other build says "dev". Only a release updates itself or checks for updates.
+var (
+	version     = "dev"
+	buildSource = "dev"
+)
 
 func init() {
-	if info, ok := debug.ReadBuildInfo(); ok && version == "dev" && strings.HasPrefix(info.Main.Version, "v") {
-		version = info.Main.Version
+	if info, ok := debug.ReadBuildInfo(); ok && buildSource == "dev" && strings.HasPrefix(info.Main.Version, "v") {
+		version, buildSource = info.Main.Version, "module"
 	}
 }
+
+// versionLine is what `spun --version` prints; parseVersionLine reads it back from another binary.
+func versionLine() string { return "spun version " + version + " (" + buildSource + ")" }
 
 const longHelp = `spun — operate a Spun site from the shell
 
@@ -56,6 +63,8 @@ type app struct {
 	stdout  io.Writer
 	bobbin  bool // draw the mascot: stdout is a terminal that takes colour
 	result  any
+	ran     bool // a command ran (not --version or --help)
+	quiet   bool // the command leaves no trace: no skill refresh, no update check
 }
 
 func (a *app) client() (*Client, error) { return resolve(a.profile) }
@@ -74,6 +83,8 @@ func (a *app) root() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 	}
+	root.SetVersionTemplate(versionLine() + "\n")
+	root.PersistentPreRun = func(*cobra.Command, []string) { a.ran = true }
 	root.SetOut(a.stdout)
 	root.SetErr(a.stdout)
 	root.PersistentFlags().StringVar(&a.site, "site", "", "target site `handle` (the tools' site selector)")
@@ -114,3 +125,11 @@ func (a *app) run(argv []string) (any, error) {
 }
 
 func newApp() *app { return &app{stdin: os.Stdin, stdout: os.Stdout, bobbin: bobbinWanted()} }
+
+// afterCommand runs once the command's output is written: it can neither change that output nor
+// the exit code, and it writes to stderr only.
+func (a *app) afterCommand() {
+	if !a.ran || a.quiet {
+		return
+	}
+}

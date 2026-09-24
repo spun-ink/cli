@@ -140,10 +140,25 @@ func loginNext(profile string, noSetup bool, skills []skillRow) []string {
 	if profile != defaultProfile {
 		next = append(next, "export SPUN_PROFILE="+profile+"   # or --profile "+profile+" on every command")
 	}
-	if noSetup || len(skills) == 0 {
-		next = append(next, "spun setup claude                # or codex: install the spun skill for your agent")
+	var started []string
+	for _, row := range skills {
+		if start, ok := agentStart[row.Agent]; ok && row.Action != "skipped" {
+			started = append(started, start)
+		}
 	}
-	return append(next, "ask your agent to work on your site — or try `spun tools`")
+	if len(started) == 0 {
+		next = append(next, "spun setup claude                # or codex: install the spun skill for your agent")
+		started = []string{"ask your agent to work on your site"}
+	}
+	next = append(next, started...)
+	return append(next, "or try `spun tools` yourself")
+}
+
+// agentStart opens each agent on the skill setup installed, by its name `spun`. Codex's `$spun` is
+// single-quoted so the shell does not expand it.
+var agentStart = map[string]string{
+	"claude": `claude "/spun build my site"`,
+	"codex":  `codex '$spun build my site'`,
 }
 
 const loginExample = "spun login"

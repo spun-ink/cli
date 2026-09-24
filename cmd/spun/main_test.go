@@ -1099,3 +1099,39 @@ func TestTwoProfilesOnOneServerKeepTheirOwnTokens(t *testing.T) {
 		t.Fatalf("logout of one profile touched the other: %v, %v", value, f)
 	}
 }
+
+func TestVersionNamesTheBuildSource(t *testing.T) {
+	isolate(t)
+	previous, previousSource := version, buildSource
+	t.Cleanup(func() { version, buildSource = previous, previousSource })
+	for _, source := range []string{"release", "snapshot", "module", "dev"} {
+		version, buildSource = "1.2.3", source
+		var out strings.Builder
+		a := &app{stdin: stdinWith(t, ""), stdout: &out}
+		if _, err := a.run([]string{"--version"}); err != nil {
+			t.Fatal(err)
+		}
+		if want := "spun version 1.2.3 (" + source + ")\n"; out.String() != want {
+			t.Fatalf("got %q, want %q", out.String(), want)
+		}
+		if a.ran {
+			t.Fatal("--version counts as a command run")
+		}
+	}
+}
+
+func TestHelpAndVersionLeaveNoTrace(t *testing.T) {
+	isolate(t)
+	for _, argv := range [][]string{{"--version"}, {"--help"}, {"help"}, {"help", "tools"}, {"tools", "--help"}} {
+		a := &app{stdin: stdinWith(t, ""), stdout: io.Discard}
+		_, _ = a.run(argv)
+		if a.ran && !a.quiet {
+			t.Fatalf("%v would refresh the skill or check for updates", argv)
+		}
+	}
+	a := &app{stdin: stdinWith(t, ""), stdout: io.Discard}
+	_, _ = a.run([]string{"profiles"})
+	if !a.ran || a.quiet {
+		t.Fatal("an ordinary command must run the after-command steps")
+	}
+}

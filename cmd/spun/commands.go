@@ -54,6 +54,7 @@ func (a *app) helpCmd(root *cobra.Command) *cobra.Command {
 		Short: "Help for a command, or one tool's description and input schema",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
+			a.quiet = true
 			if len(args) == 0 {
 				return root.Help()
 			}

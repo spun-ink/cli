@@ -98,13 +98,19 @@ func drawBobbin(name string) []string {
 	return lines
 }
 
-// beside puts text to the right of Bobbin, vertically centred on him.
+// beside puts text to the right of Bobbin, vertically centred on him; text taller than him runs on
+// below, still in its column.
 func beside(scene string, text ...string) string {
 	art := drawBobbin(scene)
 	offset := max(0, (len(art)-len(text))/2)
+	blank := strings.Repeat(" ", len(sceneGrid(scene)[0]))
 	var out strings.Builder
-	for i, line := range art {
-		out.WriteString(line)
+	for i := range max(len(art), len(text)) {
+		if i < len(art) {
+			out.WriteString(art[i])
+		} else {
+			out.WriteString(blank)
+		}
 		if j := i - offset; j >= 0 && j < len(text) {
 			out.WriteString("   " + text[j])
 		}
