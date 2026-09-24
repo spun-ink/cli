@@ -105,8 +105,8 @@ already loaded: suggest a new session.
 ## One write per command
 
 Run each write as its own shell command, never chained with `&&` or `;`, and say what it changes
-before you run it. A reviewer — the owner, or a permission check — can approve one small command it
-understands; a chain of four writes reads as one opaque deploy and gets refused.
+before you run it. The owner can follow one change at a time, and a refused or failed write stops
+alone instead of taking the rest of a chain with it.
 
 ## Two kinds of write — know which one you are making
 
