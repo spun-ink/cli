@@ -46,7 +46,7 @@ jobs:
         run: |
           sh scripts/install.sh
           "$SPUN_INSTALL_DIR/spun" --version | tee version.txt
-          grep -F "${GITHUB_REF_NAME#v}" version.txt
+          grep -Fx "spun version ${GITHUB_REF_NAME#v} (release)" version.txt
       - name: install.ps1
         if: runner.os == 'Windows'
         shell: pwsh
@@ -57,7 +57,7 @@ jobs:
           ./scripts/install.ps1
           $out = & "$env:SPUN_INSTALL_DIR\spun.exe" --version
           $out
-          if (-not ($out -match [regex]::Escape($env:GITHUB_REF_NAME.TrimStart('v')))) { exit 1 }
+          if ($out -ne "spun version $($env:GITHUB_REF_NAME.TrimStart('v')) (release)") { exit 1 }
       # Upgrades an older release to this one. SPUN_UPGRADE_FROM (a repository variable) names a
       # release that already has `spun upgrade`; the leg is off until it is set. The target is named,
       # never "latest": a bare `spun upgrade` skips prereleases and races later tags.
