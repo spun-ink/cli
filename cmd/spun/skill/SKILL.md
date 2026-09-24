@@ -94,6 +94,14 @@ Until then no write has an audience: build templates, settings and the first pag
 hand the owner a `create_preview_link` URL to look at. The deploy discipline below starts the
 moment the site is public.
 
+## Keeping spun current
+
+`spun upgrade --check` reports `{current, latest, available}` and changes nothing. To update, run
+`spun upgrade` as its own command and say so first: it replaces the binary you are calling. Exit 5
+`upgrade_required` means this install cannot update itself — pass the command in its message on to
+the owner. This file is rewritten on the next command after an upgrade, but you keep the text you
+already loaded: suggest a new session.
+
 ## One write per command
 
 Run each write as its own shell command, never chained with `&&` or `;`, and say what it changes

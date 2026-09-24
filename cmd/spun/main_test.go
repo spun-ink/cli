@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime/debug"
 	"strings"
 	"testing"
 
@@ -1133,5 +1134,22 @@ func TestHelpAndVersionLeaveNoTrace(t *testing.T) {
 	_, _ = a.run([]string{"profiles"})
 	if !a.ran || a.quiet {
 		t.Fatal("an ordinary command must run the after-command steps")
+	}
+}
+
+func TestOnlyAModuleBuildCountsAsModule(t *testing.T) {
+	checkout := []debug.BuildSetting{{Key: "vcs", Value: "git"}, {Key: "vcs.revision", Value: "5dc8d4c"}}
+	for name, tc := range map[string]struct {
+		info debug.BuildInfo
+		want bool
+	}{
+		"go install tag":            {debug.BuildInfo{Main: debug.Module{Version: "v1.2.3"}}, true},
+		"go install pseudo-version": {debug.BuildInfo{Main: debug.Module{Version: "v0.1.1-0.20260924135047-5dc8d4c2f6d2"}}, true},
+		"go build in a checkout":    {debug.BuildInfo{Main: debug.Module{Version: "v0.1.1-0.20260924135047-5dc8d4c2f6d2+dirty"}, Settings: checkout}, false},
+		"go run":                    {debug.BuildInfo{Main: debug.Module{Version: "(devel)"}}, false},
+	} {
+		if fromModule(&tc.info) != tc.want {
+			t.Fatalf("%s: want %v", name, tc.want)
+		}
 	}
 }

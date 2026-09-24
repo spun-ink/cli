@@ -20,9 +20,20 @@ var (
 )
 
 func init() {
-	if info, ok := debug.ReadBuildInfo(); ok && buildSource == "dev" && strings.HasPrefix(info.Main.Version, "v") {
+	if info, ok := debug.ReadBuildInfo(); ok && buildSource == "dev" && fromModule(info) {
 		version, buildSource = info.Main.Version, "module"
 	}
+}
+
+// fromModule: built by `go install …@<version>` from the module proxy. A build in a checkout also
+// gets a version since Go 1.24, but carries vcs.* settings, and stays "dev".
+func fromModule(info *debug.BuildInfo) bool {
+	for _, setting := range info.Settings {
+		if strings.HasPrefix(setting.Key, "vcs") {
+			return false
+		}
+	}
+	return strings.HasPrefix(info.Main.Version, "v")
 }
 
 // canonicalVersion is s as a full semver version with its leading v — X.Y.Z[-pre], nothing
@@ -46,8 +57,10 @@ args:   key=value (string)   key:=json (raw JSON)   key=@path (file contents)   
 env:    SPUN_PROFILE  profile to use when --profile is not given
         SPUN_URL      server root, e.g. https://spun.ink — with SPUN_TOKEN, instead of a profile
         SPUN_TOKEN    bearer token — overrides the stored one; alone, it goes to https://spun.ink
+        SPUN_NO_UPDATE_CHECK=1  never check for a newer release (` + "`spun upgrade --check`" + ` still does)
 output: human-readable at a terminal, JSON when piped; errors on stderr as {ok:false,error:{code,message}}
-exit:   0 ok · 1 tool refused · 2 usage or unknown tool · 3 unauthorized · 4 network · 5 config`
+exit:   0 ok · 1 tool refused · 2 usage or unknown tool · 3 unauthorized · 4 network or failed upgrade
+        · 5 config, or this install cannot upgrade itself`
 
 var gettingStarted = []string{
 	"Getting started:",
@@ -117,7 +130,7 @@ func (a *app) root() *cobra.Command {
 	})
 	root.AddCommand(
 		a.toolsCmd(), a.callCmd(), a.assetCmd(), a.templateCmd(), a.contentCmd(),
-		a.signupCmd(), a.loginCmd(), a.logoutCmd(), a.profilesCmd(), a.setupCmd(),
+		a.signupCmd(), a.loginCmd(), a.logoutCmd(), a.profilesCmd(), a.setupCmd(), a.upgradeCmd(),
 	)
 	return root
 }
