@@ -105,7 +105,18 @@ agent session that has already loaded the skill keeps the old text until it rest
    Both also install the `spun` skill for every agent it finds (`~/.claude`, `~/.codex` or
    `$CODEX_HOME`). `--no-setup` skips that; `spun setup` reruns it, `spun setup --remove` undoes it.
 
-2. Ask your agent to work on your site — or look around yourself:
+2. Start your agent on the skill — `/spun` in Claude Code, `$spun` in Codex:
+
+   ```bash
+   claude "/spun build my site"
+   codex '$spun build my site'        # single quotes, or the shell expands $spun
+   ```
+
+   Depending on its permission mode, your agent may ask before a `spun` command. To let Claude Code run `spun` without
+   asking, add `"Bash(spun *)"` to `permissions.allow` in `~/.claude/settings.json` yourself —
+   `spun` never changes your agent's permissions.
+
+   Or look around yourself:
 
    ```bash
    spun tools                         # every tool with a one-line summary
