@@ -171,6 +171,39 @@ At a terminal output is readable; piped, stdout is JSON. Errors go to stderr as
 | 4 | network or protocol failure, or a failed upgrade (`upgrade_failed`, `upgrade_rolled_back`, `upgrade_broken` — the message says what is installed now) |
 | 5 | no server named, local configuration missing, or this install cannot upgrade itself (`upgrade_required`) |
 
+## Uninstall
+
+Run these in order — the first two need `spun` itself:
+
+1. `spun setup --remove` — removes the skill from every agent it was installed for. A skill
+   installed with `--dir` goes with `spun setup <agent> --dir <path> --remove`.
+2. `spun logout`, and `spun logout --profile <name>` for every other profile `spun profiles`
+   lists. This deletes the token from the OS credential store, which deleting files would leave
+   behind.
+3. Delete the binary and spun's configuration.
+
+   **macOS / Linux**
+
+   ```bash
+   rm -f ~/.local/bin/spun ~/.local/bin/.spun.lock ~/.local/bin/.spun-*
+   rm -rf ~/.config/spun              # or $XDG_CONFIG_HOME/spun
+   ```
+
+   **Windows (PowerShell)**
+
+   ```powershell
+   Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Programs\spun"
+   Remove-Item -Recurse -Force "$env:USERPROFILE\.config\spun"
+   ```
+
+   Then remove `%LOCALAPPDATA%\Programs\spun` from your user `Path`, which the installer added.
+
+   Installed with `SPUN_INSTALL_DIR`? Use that directory. Built with `go install`? Delete
+   `$(go env GOPATH)/bin/spun`.
+
+Nothing changes on the server: your site, your account and your token stay; `spun login` takes the
+token again after a reinstall.
+
 ## Documentation
 
 The platform: https://spun.ink/docs. The authoring manual for agents: `spun call capabilities`.
