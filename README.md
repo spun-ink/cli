@@ -1,8 +1,8 @@
 <p align="center">
   <a href="https://spun.ink">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset=".github/assets/spun-logo-dark.svg">
-      <img src=".github/assets/spun-logo.svg" alt="spun" width="280">
+      <source media="(prefers-color-scheme: dark)" srcset=".github/assets/spun-ink-logo-dark.svg">
+      <img src=".github/assets/spun-ink-logo.svg" alt="spun.ink" width="360">
     </picture>
   </a>
 </p>
