@@ -29,24 +29,19 @@ uploads anything by hand.
 
 A security fix is a release like any other. Its notes say what it fixes (see [SECURITY.md](SECURITY.md)).
 
-## The upgrade leg — `SPUN_UPGRADE_FROM`
+## The upgrade leg
 
-The smoke job also installs an older release and runs `spun upgrade <new tag>` on it. That tests
-the way most users will get the release: through the updater of the version they already have.
+The smoke job also installs the **previous release** and runs `spun upgrade <new tag>` with it.
+That tests the way most users will get the release: through the updater of the version they
+already have. The fresh install above cannot catch a broken updater.
 
-- The repository variable **`SPUN_UPGRADE_FROM`** names that older release. The leg is off while
-  the variable is unset. It has been on since `v0.2.0`, the first release with `spun upgrade`.
-- **After each release, set it to the release you just published.** The next release is then
-  tested from the version most users run:
+Nothing needs setting. The publish job picks the previous release from the git tags: the newest
+earlier tag in the new tag's history that is not a prerelease. It skips the leg when that release
+is older than `v0.2.0`, the first release with `spun upgrade`.
 
-  ```bash
-  gh variable set SPUN_UPGRADE_FROM --repo spun-ink/cli --body v0.3.0
-  ```
-
-- It must never name a release older than `v0.2.0`, which has no `spun upgrade`.
-- On Windows, a hosted runner may run elevated. `spun upgrade` refuses that by design (exit 5,
-  `upgrade_required`), and the leg records a warning instead of failing. A warning there is
-  expected; a failure is not.
+Hosted Windows runners run as administrator, and `spun upgrade` refuses that by design (exit 5,
+`upgrade_required`). The Windows leg therefore records a warning instead of upgrading. That
+warning is expected. The Windows swap itself is covered by the unit tests in CI's Windows job.
 
 ## If a release goes wrong
 
