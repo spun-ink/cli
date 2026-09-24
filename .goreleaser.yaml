@@ -1,0 +1,61 @@
+# A `v*` tag publishes a GitHub release: six archives, checksums.txt and an SPDX SBOM per archive.
+# `goreleaser release --snapshot --clean` builds the same locally (it needs syft on PATH).
+version: 2
+
+project_name: spun
+
+builds:
+  - main: ./cmd/spun
+    binary: spun
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE, README.md, SECURITY.md]
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+sboms:
+  - artifacts: archive
+
+release:
+  github:
+    owner: spun-ink
+    name: cli
+  prerelease: auto
+  name_template: "spun v{{ .Version }}"
+  header: |
+    ### Install
+
+    **macOS / Linux:**
+    ```sh
+    curl -fsSL https://raw.githubusercontent.com/spun-ink/cli/main/scripts/install.sh | sh
+    ```
+
+    **Windows (PowerShell):**
+    ```powershell
+    irm https://raw.githubusercontent.com/spun-ink/cli/main/scripts/install.ps1 | iex
+    ```
+
+    **Go:** `go install github.com/spun-ink/cli/cmd/spun@v{{ .Version }}`
+
+    Or download an archive below and check it against `checksums.txt`. The macOS binary is not
+    notarized: an archive downloaded with a browser needs `xattr -d com.apple.quarantine spun` once;
+    the install script and `go install` do not.
+
+    Then `spun signup` for a new account, or `spun login` for an existing one.
+
+changelog:
+  use: github-native
