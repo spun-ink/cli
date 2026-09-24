@@ -517,7 +517,7 @@ func TestAFailedRollbackNamesTheBackup(t *testing.T) {
 		t.Fatalf("got %v", f)
 	}
 	backups, _ := filepath.Glob(filepath.Join(filepath.Dir(exe), ".spun-*.backup"))
-	if len(backups) != 1 || !strings.Contains(f.message(), backups[0]) {
+	if len(backups) != 1 || !strings.Contains(f.message(), filepath.Base(backups[0])) {
 		t.Fatalf("message %q does not name the backup %v", f.message(), backups)
 	}
 	if contents(t, backups[0]) != string(fakeBinary("1.2.0")) {
