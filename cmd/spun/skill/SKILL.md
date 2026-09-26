@@ -108,6 +108,14 @@ Run each write as its own shell command, never chained with `&&` or `;`, and say
 before you run it. The owner can follow one change at a time, and a refused or failed write stops
 alone instead of taking the rest of a chain with it.
 
+## Before the first write — the quality guide
+
+Load the quality guide, https://github.com/cityofcode-io/agent-operated-websites (the server names
+the same URL in `spun call capabilities section=links`), and run its §2 preflight before you write
+anything: prove your browser tools run, answer its platform questions from `capabilities`
+(`section=authoring_loop`), take a recovery point with `checkpoint`, record a baseline. Then author.
+Its checks decide when a build is done; its report goes to the owner with the preview link.
+
 ## Two kinds of write — know which one you are making
 
 **Only content has a draft.** Pages, posts and their blocks stay draft until `publish_content`;
