@@ -193,7 +193,7 @@ func (c *Client) cachePath() string {
 	return filepath.Join(base, "spun", "tools-"+hex.EncodeToString(sum[:12])+".json")
 }
 
-func (c *Client) upload(path, alt string, site string) (any, error) {
+func (c *Client) upload(path, alt, title, site string) (any, error) {
 	data, err := readUpload(path)
 	if err != nil {
 		return nil, err
@@ -202,6 +202,9 @@ func (c *Client) upload(path, alt string, site string) (any, error) {
 	args := map[string]any{"filename": filepath.Base(path), "sha256": hex.EncodeToString(sum[:])}
 	if alt != "" {
 		args["alt"] = alt
+	}
+	if title != "" {
+		args["title"] = title
 	}
 	if site != "" {
 		args["site"] = site
