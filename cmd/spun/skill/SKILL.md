@@ -135,14 +135,18 @@ diff hero.orig.liquid hero.liquid                    # 3. show the owner the cha
 spun template push hero hero.liquid                  # 4. push — live now
 ```
 
+A schema change travels the same way: `pull --schema hero.json` writes the field list next to the
+markup, and `push --schema hero.json` sends both in one render-checked write. The schema is a full
+replace — a field left out stops rendering, and the reply warns `schema_fields_removed`.
+
 The push is render-checked, so broken Liquid is refused; an unwanted design is not. Every live
 write records the state it replaced: `spun call list_revisions type=template` (or `type=site` for
 settings, navigation and forms) and `restore_revision` undo it. To try a template out safely, create
 it under a new key nothing references yet, use it from draft content, and preview that —
 `spun call capabilities section=authoring_loop` has the full swap procedure.
 
-Files never pass through the model: `spun asset upload photo.jpg --alt "…"` sends the bytes and
-verifies their sha256.
+Files never pass through the model: `spun asset upload photo.jpg --alt "…" --title "…"` sends the
+bytes and verifies their sha256. A title tells near-identical variants apart in `list_assets`.
 
 Bulk work composes:
 
