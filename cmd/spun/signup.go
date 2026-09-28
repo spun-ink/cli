@@ -163,7 +163,8 @@ func confirm(input *bufio.Reader, prompt string) bool {
 	return err == nil && (answer == "y" || answer == "yes")
 }
 
-// signUpTerms reads the terms from the tokenless tools/list, which lists sign_up alone.
+// signUpTerms reads the terms from the tokenless tools/list, which lists sign_up plus whatever
+// tools an account-wide OAuth grant can call; it finds sign_up by name.
 func (c *Client) signUpTerms() (map[string]any, error) {
 	result, err := c.rpc("tools/list", map[string]any{})
 	if err != nil {

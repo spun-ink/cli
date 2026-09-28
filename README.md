@@ -124,6 +124,12 @@ agent session that has already loaded the skill keeps the old text until it rest
    spun call site_map
    ```
 
+   On Claude on the web or Claude Desktop you need neither the CLI nor a token: add
+   `https://spun.ink/mcp` as a custom connector (Settings → Connectors) and sign in with your
+   email in the window that opens. If you signed up with `spun signup`, click your verification
+   email first — signing in through the connector window with an unverified account claims it and
+   replaces the account's token.
+
 ## Servers and profiles
 
 A command that names no server goes to **https://spun.ink — the live site**. Another server (a
