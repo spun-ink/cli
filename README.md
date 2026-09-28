@@ -152,9 +152,9 @@ spun --profile dev tools              # or: export SPUN_PROFILE=dev
 ```bash
 spun call update_content slug=about title="About us"
 spun call update_block id:=42 data:=@hero.json
-spun template pull hero > hero.liquid
-spun template push hero hero.liquid
-spun asset upload photo.jpg --alt "The team"
+spun template pull hero --schema hero.json > hero.liquid
+spun template push hero hero.liquid --schema hero.json
+spun asset upload photo.jpg --alt "The team" --title "Team photo, 2026"
 ```
 
 ## Output and exit codes

@@ -16,10 +16,14 @@ import (
 	"github.com/zalando/go-keyring"
 )
 
+// toolArgs holds the arguments of the latest call fakeServer answered, per tool.
+var toolArgs map[string]map[string]any
+
 // fakeServer answers /mcp like the spun server: 401 for any token but "good", a tool reply for
 // tools/call, a scoped tools/list per token.
 func fakeServer(t *testing.T) *httptest.Server {
 	t.Helper()
+	toolArgs = map[string]map[string]any{}
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPut {
@@ -67,6 +71,7 @@ func fakeServer(t *testing.T) *httptest.Server {
 			reply(map[string]any{"tools": tools})
 		case "tools/call":
 			args := req.Params.Arguments
+			toolArgs[req.Params.Name] = args
 			switch req.Params.Name {
 			case "get_template":
 				if args["key"] == "nope" {
@@ -77,7 +82,8 @@ func fakeServer(t *testing.T) *httptest.Server {
 					tool(map[string]any{"key": args["key"]}, false)
 					return
 				}
-				tool(map[string]any{"key": args["key"], "markup": "<h1>{{ page.title }}</h1>"}, false)
+				tool(map[string]any{"key": args["key"], "markup": "<h1>{{ page.title }}</h1>",
+					"schema": []any{map[string]any{"name": "heading", "type": "string"}}}, false)
 			case "update_template":
 				tool(map[string]any{"key": args["key"], "markup": args["markup"]}, false)
 			case "create_upload_link":
@@ -731,6 +737,75 @@ func TestTemplatePullIsExactAndPushDropsTheEcho(t *testing.T) {
 	}
 	if _, echoed := value.(map[string]any)["markup"]; echoed {
 		t.Fatalf("markup echoed: %v", value)
+	}
+}
+
+func TestTemplateSchemaRoundTrips(t *testing.T) {
+	isolate(t)
+	server := fakeServer(t)
+	t.Setenv("SPUN_URL", server.URL)
+	t.Setenv("SPUN_TOKEN", "good")
+	dir := t.TempDir()
+	schema, markup := filepath.Join(dir, "hero.json"), filepath.Join(dir, "hero.liquid")
+	_ = os.WriteFile(markup, []byte("<h2>x</h2>"), 0o644)
+
+	value, f := run(t, "", "template", "pull", "hero", "--schema", schema)
+	if f != nil || value != raw("<h1>{{ page.title }}</h1>") {
+		t.Fatalf("stdout stays the markup alone: %#v %v", value, f)
+	}
+	written, _ := os.ReadFile(schema)
+	if !strings.Contains(string(written), `"name": "heading"`) {
+		t.Fatalf("schema file: %s", written)
+	}
+
+	if _, f := run(t, "", "template", "push", "hero", markup, "--schema", schema); f != nil {
+		t.Fatal(f)
+	}
+	want := []any{map[string]any{"name": "heading", "type": "string"}}
+	if got := toolArgs["update_template"]; !reflect.DeepEqual(got["schema"], want) || got["markup"] != "<h2>x</h2>" {
+		t.Fatalf("update_template got %v", got)
+	}
+
+	if _, f := run(t, "", "template", "push", "hero", markup); f != nil {
+		t.Fatal(f)
+	}
+	if _, sent := toolArgs["update_template"]["schema"]; sent {
+		t.Fatal("a push without --schema must leave the schema alone")
+	}
+}
+
+func TestTemplatePushRefusesABadSchemaBeforeAnyCall(t *testing.T) {
+	isolate(t)
+	server := fakeServer(t)
+	t.Setenv("SPUN_URL", server.URL)
+	t.Setenv("SPUN_TOKEN", "good")
+	dir := t.TempDir()
+	markup := filepath.Join(dir, "hero.liquid")
+	_ = os.WriteFile(markup, []byte("<h2>x</h2>"), 0o644)
+	for name, body := range map[string]string{"broken.json": "[{", "object.json": `{"name":"x"}`} {
+		path := filepath.Join(dir, name)
+		_ = os.WriteFile(path, []byte(body), 0o644)
+		if _, f := run(t, "", "template", "push", "hero", markup, "--schema", path); exitCode(f) != exitUsage {
+			t.Fatalf("%s: got %v", name, f)
+		}
+	}
+	if _, called := toolArgs["update_template"]; called {
+		t.Fatal("a refused schema must not reach the server")
+	}
+}
+
+func TestAssetUploadSendsTitle(t *testing.T) {
+	isolate(t)
+	server := fakeServer(t)
+	t.Setenv("SPUN_URL", server.URL)
+	t.Setenv("SPUN_TOKEN", "good")
+	path := filepath.Join(t.TempDir(), "hero-900.webp")
+	_ = os.WriteFile(path, []byte("webp"), 0o644)
+	if _, f := run(t, "", "asset", "upload", path, "--title", "Hero, mobile 900px", "--alt", "Team"); f != nil {
+		t.Fatal(f)
+	}
+	if got := toolArgs["create_upload_link"]; got["title"] != "Hero, mobile 900px" || got["alt"] != "Team" {
+		t.Fatalf("create_upload_link got %v", got)
 	}
 }
 

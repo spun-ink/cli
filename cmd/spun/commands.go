@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"slices"
 	"strings"
@@ -105,7 +106,7 @@ func (a *app) callCmd() *cobra.Command {
 }
 
 func (a *app) assetCmd() *cobra.Command {
-	var alt string
+	var alt, title string
 	upload := &cobra.Command{
 		Use:   "upload <path>",
 		Short: "Upload a local file; its bytes never pass through the agent",
@@ -115,7 +116,7 @@ func (a *app) assetCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			asset, err := c.upload(args[0], alt, a.site)
+			asset, err := c.upload(args[0], alt, title, a.site)
 			if err != nil {
 				return err
 			}
@@ -123,15 +124,17 @@ func (a *app) assetCmd() *cobra.Command {
 		},
 	}
 	upload.Flags().StringVar(&alt, "alt", "", "alt text for the asset")
+	upload.Flags().StringVar(&title, "title", "", "title for the asset, shown by list_assets")
 	cmd := &cobra.Command{Use: "asset", Short: "Upload assets"}
 	cmd.AddCommand(upload)
 	return cmd
 }
 
 func (a *app) templateCmd() *cobra.Command {
+	var pullSchema, pushSchema string
 	pull := &cobra.Command{
 		Use:   "pull <key>",
-		Short: "Print a template's markup, byte for byte",
+		Short: "Print a template's markup, byte for byte; --schema also writes its schema to a file",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			c, err := a.client()
@@ -149,23 +152,37 @@ func (a *app) templateCmd() *cobra.Command {
 			if !ok {
 				return fail(exitNetwork, "bad_response", "get_template replied without markup")
 			}
+			if pullSchema != "" {
+				schema, _ := json.MarshalIndent(fields["schema"], "", "  ")
+				if err := os.WriteFile(pullSchema, append(schema, '\n'), 0o644); err != nil {
+					return fail(exitNetwork, "write_failed", err.Error())
+				}
+			}
 			return a.emit(raw(markup))
 		},
 	}
 	push := &cobra.Command{
 		Use:   "push <key> <file>",
-		Short: "Replace a template's markup from a file",
+		Short: "Replace a template's markup from a file; --schema also replaces its schema",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
 			markup, err := os.ReadFile(args[1])
 			if err != nil {
 				return usage("%s: %v", args[1], err)
 			}
+			toolArgs := map[string]any{"key": args[0], "markup": string(markup)}
+			if pushSchema != "" {
+				schema, err := readSchema(pushSchema)
+				if err != nil {
+					return err
+				}
+				toolArgs["schema"] = schema
+			}
 			c, err := a.client()
 			if err != nil {
 				return err
 			}
-			template, err := c.call("update_template", a.withSite(map[string]any{"key": args[0], "markup": string(markup)}))
+			template, err := c.call("update_template", a.withSite(toolArgs))
 			if err != nil {
 				return err
 			}
@@ -177,9 +194,28 @@ func (a *app) templateCmd() *cobra.Command {
 			return a.emit(template)
 		},
 	}
-	cmd := &cobra.Command{Use: "template", Short: "Move template markup between a file and the site"}
+	pull.Flags().StringVar(&pullSchema, "schema", "", "also write the template's schema, as JSON, to this file")
+	push.Flags().StringVar(&pushSchema, "schema", "", "also replace the template's schema from this JSON file (a full replace)")
+	cmd := &cobra.Command{Use: "template", Short: "Move template markup and schema between files and the site"}
 	cmd.AddCommand(pull, push)
 	return cmd
+}
+
+// readSchema accepts what `template pull --schema` writes: a JSON array of fields, or null for a
+// template without one. Anything else is refused before a call is made.
+func readSchema(path string) (any, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, usage("%s: %v", path, err)
+	}
+	var schema any
+	if err := json.Unmarshal(data, &schema); err != nil {
+		return nil, usage("%s: not JSON: %v", path, err)
+	}
+	if _, ok := schema.([]any); !ok && schema != nil {
+		return nil, usage("%s: a schema is a JSON array of fields", path)
+	}
+	return schema, nil
 }
 
 func (a *app) contentCmd() *cobra.Command {
