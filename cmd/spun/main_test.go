@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -24,6 +25,8 @@ var toolArgs map[string]map[string]any
 func fakeServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	toolArgs = map[string]map[string]any{}
+	fake.legacy, fake.rateLimits, fake.proven, fake.calls = false, 0, false, nil
+	signUpCalls = 0
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPut {
@@ -123,6 +126,25 @@ const testNotice = "By creating an account, you agree to our Terms of Service (h
 // signUpCalls counts the tokenless sign_up calls fakeServer has answered.
 var signUpCalls int
 
+const (
+	testSignup = "quiet-otter-1"
+	testCode   = "482913"
+)
+
+// fake steers the tokenless sign_up: legacy answers the one-call server from before the code
+// switch; rateLimits and unavailable refuse that many calls the way the tool does (an isError result
+// with the code rate_limited or unavailable), rpcLimits with JSON-RPC -32002; proven marks the code
+// accepted.
+// fakeServer resets it, so a test sets it after starting the server.
+var fake struct {
+	legacy      bool
+	rateLimits  int
+	unavailable int
+	rpcLimits   int
+	proven      bool
+	calls       []map[string]any
+}
+
 // tokenless answers like the bootstrap surface: tools/list names sign_up alone with its terms, and
 // sign_up refuses the handle "taken". Anything else is a 401, so a leaked tokenless call fails loudly.
 func tokenless(w http.ResponseWriter, r *http.Request) {
@@ -144,15 +166,70 @@ func tokenless(w http.ResponseWriter, r *http.Request) {
 			"_meta": map[string]any{termsMetaKey: terms}}}})
 	case req.Method == "tools/call" && req.Params.Name == "sign_up":
 		signUpCalls++
-		payload := map[string]any{"ok": true, "bearer_token": "good",
+		args := req.Params.Arguments
+		fake.calls = append(fake.calls, args)
+		tool := func(payload map[string]any) {
+			text, _ := json.Marshal(payload)
+			_, isError := payload["error"]
+			reply(map[string]any{"content": []any{map[string]any{"type": "text", "text": string(text)}}, "isError": isError})
+		}
+		next := map[string]any{"tool": "sign_up", "arguments": map[string]any{"signup": testSignup}}
+		refuse := func(code, message string, extra ...map[string]any) {
+			e := map[string]any{"code": code, "message": message}
+			for _, more := range extra {
+				for k, v := range more {
+					e[k] = v
+				}
+			}
+			tool(map[string]any{"ok": false, "error": e})
+		}
+		success := map[string]any{"ok": true, "bearer_token": "good",
 			"site":  map[string]any{"handle": "bakery", "url": "https://bakery.myspun.ink"},
 			"legal": map[string]any{"terms_version": "2026-09-01", "terms_content_hash": "abc123"}}
-		isError := req.Params.Arguments["handle"] == "taken"
-		if isError {
-			payload = map[string]any{"ok": false, "error": map[string]any{"code": "validation_failed", "message": "Handle has already been taken"}}
+		switch {
+		case fake.legacy && args["handle"] == "taken":
+			refuse("validation_failed", "Handle has already been taken")
+		case fake.legacy:
+			tool(success)
+		case fake.rateLimits > 0:
+			fake.rateLimits--
+			refuse("rate_limited", "Too many code checks for this address — wait up to an hour, then call sign_up with signup and code again.",
+				map[string]any{"next_call": next})
+		case fake.unavailable > 0:
+			fake.unavailable--
+			refuse("unavailable", "Sign-up is briefly unavailable and nothing changed — make the same call again in a minute.",
+				map[string]any{"next_call": next})
+		case fake.rpcLimits > 0:
+			fake.rpcLimits--
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": 1,
+				"error": map[string]any{"code": -32002, "message": "rate limited"}})
+		case args["email"] != nil:
+			if args["handle"] == "taken" {
+				refuse("validation_failed", "Handle has already been taken Call sign_up with email and a different name or handle — no code was sent.",
+					map[string]any{"errors": []any{"Handle has already been taken"},
+						"next_call": map[string]any{"tool": "sign_up", "arguments": map[string]any{"email": args["email"]}}})
+				return
+			}
+			tool(map[string]any{"status": "code_sent", "signup": testSignup, "email": args["email"],
+				"code_expires_in": 600, "signup_expires_in": 900, "next_step": "Ask the owner."})
+		case args["code"] == "exists":
+			refuse("account_exists", "This address already has a spun.ink account, so nothing was created.")
+		case args["code"] == "changed":
+			refuse("terms_changed", "The Terms of Service changed after the code was mailed.",
+				map[string]any{"notice": testNotice, "next_call": map[string]any{"tool": "sign_up", "arguments": map[string]any{"email": "o@example.com"}}})
+		case args["code"] == "done":
+			refuse("already_completed", "This sign-up already created its account and issued its bearer token, once.")
+		case args["signup"] != testSignup:
+			refuse("invalid_code", "The code is wrong or no longer valid.", map[string]any{"next_call": next})
+		case !fake.proven && normalizeCode(fmt.Sprint(args["code"])) != testCode:
+			refuse("invalid_code", "The code is wrong or no longer valid.", map[string]any{"next_call": next})
+		case args["handle"] == "late":
+			fake.proven = true
+			refuse("validation_failed", "Handle has already been taken The sign-up is kept: call sign_up with signup and a corrected name or handle — no code needed.",
+				map[string]any{"errors": []any{"Handle has already been taken"}, "next_call": next})
+		default:
+			tool(success)
 		}
-		text, _ := json.Marshal(payload)
-		reply(map[string]any{"content": []any{map[string]any{"type": "text", "text": string(text)}}, "isError": isError})
 	default:
 		w.WriteHeader(http.StatusUnauthorized)
 	}

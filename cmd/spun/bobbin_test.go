@@ -81,13 +81,14 @@ func TestBesideKeepsTextTallerThanBobbin(t *testing.T) {
 func TestSignupAtATerminalShowsEveryNextStep(t *testing.T) {
 	home := isolate(t)
 	server := fakeServer(t)
+	fake.legacy = true
 	_ = os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
 	var out bytes.Buffer
 	a := &app{stdin: stdinWith(t, ""), stdout: &out, bobbin: true}
 	if _, err := a.run([]string{"signup", "--profile", "dev", "--url", server.URL, "--email", "o@example.com", "--accept-terms"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"confirm the email we sent to o@example.com", `claude "/spun build my site"`, "spun tools"} {
+	for _, want := range []string{`claude "/spun build my site"`, "spun tools"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("view lacks %q: %s", want, out.String())
 		}
