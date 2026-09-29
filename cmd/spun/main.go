@@ -11,6 +11,9 @@ import (
 func main() {
 	a := newApp()
 	code := report(a.run(os.Args[1:]))
+	if code == 0 {
+		code = a.exit
+	}
 	a.afterCommand()
 	os.Exit(code)
 }

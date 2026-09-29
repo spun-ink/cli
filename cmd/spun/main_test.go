@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -24,6 +25,8 @@ var toolArgs map[string]map[string]any
 func fakeServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	toolArgs = map[string]map[string]any{}
+	fake.legacy, fake.rateLimits, fake.proven, fake.calls = false, 0, false, nil
+	signUpCalls = 0
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPut {
@@ -123,6 +126,21 @@ const testNotice = "By creating an account, you agree to our Terms of Service (h
 // signUpCalls counts the tokenless sign_up calls fakeServer has answered.
 var signUpCalls int
 
+const (
+	testSignup = "quiet-otter-1"
+	testCode   = "482913"
+)
+
+// fake steers the tokenless sign_up: legacy answers the one-call server from before the code
+// switch, rateLimits refuses that many calls with JSON-RPC -32002, proven marks the code accepted.
+// fakeServer resets it, so a test sets it after starting the server.
+var fake struct {
+	legacy     bool
+	rateLimits int
+	proven     bool
+	calls      []map[string]any
+}
+
 // tokenless answers like the bootstrap surface: tools/list names sign_up alone with its terms, and
 // sign_up refuses the handle "taken". Anything else is a 401, so a leaked tokenless call fails loudly.
 func tokenless(w http.ResponseWriter, r *http.Request) {
@@ -144,15 +162,47 @@ func tokenless(w http.ResponseWriter, r *http.Request) {
 			"_meta": map[string]any{termsMetaKey: terms}}}})
 	case req.Method == "tools/call" && req.Params.Name == "sign_up":
 		signUpCalls++
-		payload := map[string]any{"ok": true, "bearer_token": "good",
+		args := req.Params.Arguments
+		fake.calls = append(fake.calls, args)
+		tool := func(payload map[string]any) {
+			text, _ := json.Marshal(payload)
+			_, isError := payload["error"]
+			reply(map[string]any{"content": []any{map[string]any{"type": "text", "text": string(text)}}, "isError": isError})
+		}
+		refuse := func(code, message string) {
+			tool(map[string]any{"ok": false, "error": map[string]any{"code": code, "message": message}})
+		}
+		success := map[string]any{"ok": true, "bearer_token": "good",
 			"site":  map[string]any{"handle": "bakery", "url": "https://bakery.myspun.ink"},
 			"legal": map[string]any{"terms_version": "2026-09-01", "terms_content_hash": "abc123"}}
-		isError := req.Params.Arguments["handle"] == "taken"
-		if isError {
-			payload = map[string]any{"ok": false, "error": map[string]any{"code": "validation_failed", "message": "Handle has already been taken"}}
+		switch {
+		case fake.legacy && args["handle"] == "taken":
+			refuse("validation_failed", "Handle has already been taken")
+		case fake.legacy:
+			tool(success)
+		case fake.rateLimits > 0:
+			fake.rateLimits--
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": 1,
+				"error": map[string]any{"code": -32002, "message": "rate limited"}})
+		case args["email"] != nil:
+			if args["handle"] == "taken" {
+				refuse("validation_failed", "Handle has already been taken")
+				return
+			}
+			tool(map[string]any{"status": "code_sent", "signup": testSignup, "email": args["email"],
+				"code_expires_in": 600, "signup_expires_in": 900, "next_step": "Ask the owner."})
+		case args["code"] == "exists":
+			refuse("account_exists", "That email already has an account")
+		case args["signup"] != testSignup:
+			refuse("invalid_code", "That code is wrong or expired")
+		case !fake.proven && normalizeCode(fmt.Sprint(args["code"])) != testCode:
+			refuse("invalid_code", "That code is wrong or expired")
+		case args["handle"] == "late":
+			fake.proven = true
+			refuse("validation_failed", "Handle has already been taken")
+		default:
+			tool(success)
 		}
-		text, _ := json.Marshal(payload)
-		reply(map[string]any{"content": []any{map[string]any{"type": "text", "text": string(text)}}, "isError": isError})
 	default:
 		w.WriteHeader(http.StatusUnauthorized)
 	}

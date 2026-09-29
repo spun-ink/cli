@@ -42,19 +42,29 @@ If the owner already has an account, **do not sign up again** — a second sign-
 separate account; a lost token is replaced at https://spun.ink/recover.
 
 No account yet: the owner is best served running `spun signup` in their own terminal — it asks for
-email, name and site handle, shows the terms and asks them to accept. From your shell instead, run
-it once without `--accept-terms`: it refuses (exit 2) with the terms sentence and its URLs. **Show
-your human that sentence verbatim and wait for their yes** — the contract is theirs, not yours —
-then:
+email, name and site handle, shows the terms, mails a code and asks for it. From your shell instead,
+run it once without `--accept-terms`: it refuses (exit 2) with the terms sentence and its URLs.
+**Show your human that sentence verbatim and wait for their yes** — the contract is theirs, not
+yours; the code they read from their mail is the acceptance — then:
 
 ```bash
 spun signup --email <theirs> [--name <name>] [--handle <handle>] --accept-terms
 ```
 
-The token is stored as profile `spun.ink`, never shown. Tell the owner to press the button in the
-confirmation email; the site stays under construction until they do. `validation_failed` (exit 1,
-e.g. a taken handle) means pass another `--handle`. Exit 3 means the server rejected the token: send the owner to `/recover`,
-do not retry with guesses.
+This sends a code to the owner's mail and exits with status **6** (not a failure), printing
+`{"status":"code_sent","email":…}`. **Ask the owner for the code**, then finish it — no email needed,
+the pending sign-up is remembered per profile and server:
+
+```bash
+spun signup --code <code> [--name <name>] [--handle <handle>]
+```
+
+The token is stored as profile `spun.ink`, never shown. The account is verified and the site online
+once the code is accepted; there is no confirmation email to click. `invalid_code` (exit 1): wrong
+or expired code — ask the owner again, or start over with `spun signup`. `validation_failed`
+(e.g. a taken handle): repeat `--code` with another `--name`/`--handle`, no new code. `rate_limited`
+(exit 4): wait, then repeat the same command. Exit 3 means the server rejected the token: send the
+owner to `/recover`, do not retry with guesses.
 
 ## Learn a tool before you call it
 
@@ -85,8 +95,8 @@ spun call update_block id:=42 data:=@hero.json
 A new site is not public. Its root shows an under-construction page, and every other path answers
 404, while **any** of these holds:
 
-- the owner has not yet pressed the button in the confirmation email (`spun call get_account`
-  shows it)
+- the account's email is not verified — only an account made before sign-up by code can be in that
+  state (`spun call get_account` shows it)
 - the site has no layout template (`update_site layout_template=<key>` wires one)
 - no home page is published
 

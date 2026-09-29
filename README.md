@@ -84,11 +84,27 @@ agent session that has already loaded the skill keeps the old text until it rest
    spun signup --email you@example.com --name "Rosa's Bakery" --handle rosas-bakery
    ```
 
-   It shows the terms sentence spun.ink publishes (with its URLs) and asks you to accept it before
-   anything is sent; without a terminal — an agent's shell — it needs `--accept-terms`, passed only
-   once the human has read that sentence. The token the server returns is stored, never printed.
-   Then confirm the email we send: pressing its button concludes the contract and puts the site
-   online. `signup` refuses when `spun.ink` is already stored — a second sign-up is a second account.
+   It shows the terms sentence spun.ink publishes (with its URLs), then mails a six-digit code to the
+   address; entering the code is your acceptance of those terms, and the mail repeats them. At a
+   terminal `spun signup` asks for the code right there (`482 913` works as well as `482913`). The
+   account is verified the moment the code is accepted, and the site is online: there is no
+   confirmation email to click. The token the server returns is stored, never printed. `signup`
+   refuses when `spun.ink` is already stored — a second sign-up is a second account.
+
+   Without a terminal — an agent's shell — `signup` needs `--accept-terms`, passed only once the human
+   has read the terms sentence. It sends the code, prints `{"status":"code_sent","email":…}` on
+   stdout and exits with status **6**. Ask the human for the code from their mail, then finish; the
+   continuation needs no email, and the pending sign-up is bound to the server and profile it
+   started on:
+
+   ```bash
+   spun signup --code 482913
+   spun signup --code 482913 --handle rosas-bakery   # the name or handle was refused: correct it, no new code
+   ```
+
+   A rate limit (`rate_limited`) is retried by repeating the same command later. If the sign-up
+   lapsed (15 minutes) or the code is dead, start over with `spun signup`. A `spun` from before
+   this change cannot finish a sign-up: update it first (`spun upgrade`).
 
    **An existing account** — log in. The token is read from a no-echo prompt (or stdin), never from
    an argument, so it never lands in shell history. Lost it? https://spun.ink/recover.
@@ -126,9 +142,7 @@ agent session that has already loaded the skill keeps the old text until it rest
 
    On Claude on the web or Claude Desktop you need neither the CLI nor a token: add
    `https://spun.ink/mcp` as a custom connector (Settings → Connectors) and sign in with your
-   email in the window that opens. If you signed up with `spun signup`, click your verification
-   email first — signing in through the connector window with an unverified account claims it and
-   replaces the account's token.
+   email in the window that opens.
 
 ## Servers and profiles
 
@@ -176,6 +190,7 @@ At a terminal output is readable; piped, stdout is JSON. Errors go to stderr as
 | 3 | unauthorized: no token, or the server rejected it |
 | 4 | network or protocol failure, or a failed upgrade (`upgrade_failed`, `upgrade_rolled_back`, `upgrade_broken` — the message says what is installed now) |
 | 5 | no server named, local configuration missing, or this install cannot upgrade itself (`upgrade_required`) |
+| 6 | `spun signup` sent its code and waits for it: not a failure — finish with `spun signup --code <code>` |
 
 ## Uninstall
 
