@@ -20,7 +20,8 @@ const termsMetaKey = "ink.spun/terms"
 // finishes it. Distinct from every failure, so an agent's shell can tell "ask the owner" from "broken".
 const exitCodeSent = 6
 
-// maxCodeAttempts bounds the prompt loop at a terminal: past it the code is probably not coming.
+// maxCodeAttempts is the server's own: its fifth wrong code ends the sign-up. It also bounds the
+// prompt loop at a terminal, corrections included.
 const maxCodeAttempts = 5
 
 type signupDetails struct{ email, name, handle string }
@@ -109,7 +110,7 @@ func (a *app) signupCmd() *cobra.Command {
 			}
 			result, err := c.call("sign_up", args)
 			if err != nil {
-				return signupFailure(err, name, "")
+				return signupFailure(err, name, "spun signup"+profileFlag(name)+" with the same flags", false)
 			}
 			fields, _ := result.(map[string]any)
 			if token, _ := fields["bearer_token"].(string); token != "" {
@@ -229,37 +230,93 @@ func normalizeCode(s string) string {
 
 // failCode is the error code of a Fail: a tool's ("invalid_code") or a JSON-RPC one ("-32002").
 func failCode(err error) string {
-	var f *Fail
-	if !errors.As(err, &f) {
-		return ""
-	}
-	body, _ := f.Body.(map[string]any)
-	e, _ := body["error"].(map[string]any)
-	if code, ok := e["code"]; ok {
-		return fmt.Sprint(code)
+	if e := errorField(err); e != nil {
+		if code, ok := e["code"]; ok {
+			return fmt.Sprint(code)
+		}
 	}
 	return ""
 }
 
-func isRateLimit(err error) bool {
-	code := failCode(err)
-	return code == "-32002" || code == "http_error" && strings.Contains(asFail(err).message(), "HTTP 429")
+// errorField is the `error` object of a Fail's body: what the server's refusal carried.
+func errorField(err error) map[string]any {
+	var f *Fail
+	if !errors.As(err, &f) {
+		return nil
+	}
+	body, _ := f.Body.(map[string]any)
+	e, _ := body["error"].(map[string]any)
+	return e
 }
 
-// signupFailure finishes a refused sign_up call: a rate limit says to repeat the same call, and a
-// refusal nothing can continue from clears the pending state. A wrong code or a refused name or
-// handle keeps it — the row is still open.
-func signupFailure(err error, profile, continueWith string) error {
-	if isRateLimit(err) {
-		msg := "rate limited — nothing was consumed; wait a little and run the same command again"
-		if continueWith != "" {
-			msg = "rate limited — nothing was consumed; wait a little and repeat `" + continueWith + "` (no new code)"
+// isBusy: the server declined this attempt and consumed nothing — a rate limit (a tool refusal, an
+// HTTP 429 or a JSON-RPC -32002) or a brief outage. The same call works later, with no new code.
+func isBusy(err error) bool {
+	switch failCode(err) {
+	case "rate_limited", "unavailable", "-32002":
+		return true
+	case "http_error":
+		return strings.Contains(asFail(err).message(), "HTTP 429")
+	}
+	return false
+}
+
+// worded keeps a refusal's body, its code and its next_call, and replaces the message by one that
+// names a CLI command: the server's sentences tell an agent which tool to call.
+func worded(err error, message string) *Fail {
+	f := asFail(err)
+	body, _ := f.Body.(map[string]any)
+	e := map[string]any{}
+	for k, v := range errorField(err) {
+		e[k] = v
+	}
+	e["message"] = message
+	out := map[string]any{}
+	for k, v := range body {
+		out[k] = v
+	}
+	out["error"] = e
+	return &Fail{f.Code, out}
+}
+
+// signupFailure finishes a refused sign_up call. Busy answers say to repeat the same command, with
+// no new code. Refusals nothing can continue from clear the pending state; a wrong code or a refused
+// name or handle keeps it, because the row is still open. retry is the command that repeats the call;
+// continuing is true for call 2, the only call that has a sign-up to keep.
+func signupFailure(err error, profile, retry string, continuing bool) error {
+	if isBusy(err) {
+		what, code := "rate limited", "rate_limited"
+		if failCode(err) == "unavailable" {
+			what, code = "briefly unavailable", "unavailable"
 		}
-		return fail(exitNetwork, "rate_limited", msg)
+		out := fail(exitNetwork, code, what+" — nothing was consumed and no new code is needed; wait a little and repeat `"+retry+"`")
+		if e := errorField(err); e != nil && e["next_call"] != nil {
+			out.Body.(map[string]any)["error"].(map[string]any)["next_call"] = e["next_call"]
+		}
+		return out
 	}
 	switch failCode(err) {
-	case "terms_changed", "account_exists", "already_completed", "invalid_argument":
+	case "terms_changed":
 		clearPending(profile)
+		notice, _ := errorField(err)["notice"].(string)
+		return worded(err, "The Terms of Service changed after the code was mailed, so the sign-up has ended and nothing was "+
+			"created. Show your human the new terms — "+notice+" — then run `spun signup` again; a new mail names the new version.")
+	case "account_exists", "already_completed", "invalid_argument":
+		clearPending(profile)
+	case "invalid_code":
+		return worded(err, "The code is wrong or no longer valid, or the sign-up has ended. Ask for the code in the newest mail "+
+			"from spun.ink and run `spun signup --code <code>"+profileFlag(profile)+"`. A code works for 10 minutes and five "+
+			"wrong codes end the sign-up; then run `spun signup` again.")
+	case "validation_failed":
+		reasons, _ := errorField(err)["errors"].([]any)
+		if len(reasons) == 0 {
+			break
+		}
+		if continuing {
+			return worded(err, fmt.Sprint(reasons[0])+" Run `spun signup --code <code>"+profileFlag(profile)+
+				"` again with a corrected --name or --handle; the sign-up is kept.")
+		}
+		return worded(err, fmt.Sprint(reasons[0])+" No code was sent: run `spun signup` again with a different --name or --handle.")
 	}
 	return err
 }
@@ -274,7 +331,7 @@ func (c *Client) completeSignup(profile string, args map[string]any, d signupDet
 	}
 	result, err := c.call("sign_up", args)
 	if err != nil {
-		return nil, signupFailure(err, profile, "spun signup --code <code>"+profileFlag(profile))
+		return nil, signupFailure(err, profile, "spun signup --code <code>"+profileFlag(profile), true)
 	}
 	fields, _ := result.(map[string]any)
 	if token, _ := fields["bearer_token"].(string); token == "" {
@@ -286,7 +343,7 @@ func (c *Client) completeSignup(profile string, args map[string]any, d signupDet
 // completeAtTerminal asks for the code and finishes; a wrong code is asked again, and a refused
 // name or handle is corrected at the prompt without a new code.
 func (a *app) completeAtTerminal(c *Client, profile string, input *bufio.Reader, p pendingSignup, d signupDetails) (map[string]any, error) {
-	proven := false
+	proven, wrong := false, 0
 	for attempt := 0; attempt < maxCodeAttempts; attempt++ {
 		args := map[string]any{"signup": p.Signup}
 		if !proven {
@@ -302,9 +359,14 @@ func (a *app) completeAtTerminal(c *Client, profile string, input *bufio.Reader,
 		}
 		switch failCode(err) {
 		case "invalid_code":
-			fmt.Fprintln(os.Stderr, asFail(err).message())
+			if wrong++; wrong == maxCodeAttempts {
+				clearPending(profile)
+				return nil, usage("not signed up — five wrong codes end the sign-up: run `spun signup%s` again for a new code", profileFlag(profile))
+			}
+			fmt.Fprintln(os.Stderr, "That code did not work — check the newest mail from spun.ink.")
 		case "validation_failed":
-			fmt.Fprintln(os.Stderr, asFail(err).message())
+			reasons, _ := errorField(err)["errors"].([]any)
+			fmt.Fprintln(os.Stderr, fmt.Sprint(reasons...))
 			proven = true
 			var askErr error
 			if d.name, askErr = ask(input, "Name (Enter: from the email): "); askErr != nil {

@@ -94,11 +94,24 @@ func TestSignupSurfacesAValidationFailure(t *testing.T) {
 	isolate(t)
 	server := fakeServer(t)
 	_, f := run(t, "", "signup", "--profile", "dev", "--url", server.URL, "--email", "o@example.com", "--handle", "taken", "--accept-terms")
-	if exitCode(f) != exitToolError || errorCode(f) != "validation_failed" || !strings.Contains(errorMessage(f), "already been taken") {
+	if exitCode(f) != exitToolError || errorCode(f) != "validation_failed" || !strings.Contains(errorMessage(f), "already been taken") ||
+		!strings.Contains(errorMessage(f), "No code was sent") || strings.Contains(errorMessage(f), "sign_up") {
 		t.Fatalf("got %v", f)
 	}
 	if value, _ := run(t, "", "profiles"); len(value.([]any)) != 0 {
 		t.Fatalf("stored: %v", value)
+	}
+}
+
+func TestSignupFirstCallValidationFailureSaysNoCodeWasSentEvenWithAnOlderSignUpPending(t *testing.T) {
+	server := newCodeSignup(t)
+	base := []string{"signup", "--profile", "dev", "--url", server.URL, "--accept-terms"}
+	run(t, "", append(base, "--email", "o@example.com")...)
+
+	_, f := run(t, "", append(base, "--email", "o@example.com", "--handle", "taken")...)
+	if errorCode(f) != "validation_failed" || !strings.Contains(errorMessage(f), "No code was sent") ||
+		strings.Contains(errorMessage(f), "--code") {
+		t.Fatalf("got %v", f)
 	}
 }
 
@@ -197,6 +210,21 @@ func TestSignupAtATerminalLetsTheHumanRetryAWrongCode(t *testing.T) {
 	}
 }
 
+func TestSignupAtATerminalEndsTheSignUpAfterFiveWrongCodes(t *testing.T) {
+	server := newCodeSignup(t)
+	_, f := runTerminal(t, "y\n111111\n222222\n333333\n444444\n555555\n", "signup", "--profile", "dev", "--url", server.URL,
+		"--email", "o@example.com", "--no-setup")
+	if exitCode(f) != exitUsage || signUpCalls != 6 {
+		t.Fatalf("got %v after %d calls", f, signUpCalls)
+	}
+	if !strings.Contains(errorMessage(f), "five wrong codes end the sign-up") || strings.Contains(errorMessage(f), "--code") {
+		t.Fatalf("message: %s", errorMessage(f))
+	}
+	if _, held := pendingFor(t, "dev"); held {
+		t.Fatal("a sign-up the server ended is still pending")
+	}
+}
+
 func TestSignupAtATerminalCorrectsARefusedHandleWithoutANewCode(t *testing.T) {
 	server := newCodeSignup(t)
 	_, f := runTerminal(t, "y\n482913\n\nfresh\n", "signup", "--profile", "dev", "--url", server.URL,
@@ -276,22 +304,87 @@ func TestSignupCodeClearsThePendingStateOnATerminalRefusal(t *testing.T) {
 	}
 }
 
-func TestSignupCodeRateLimitSaysToRepeatTheSameCall(t *testing.T) {
-	server := newCodeSignup(t)
-	base := []string{"signup", "--profile", "dev", "--url", server.URL}
-	run(t, "", append(base, "--email", "o@example.com", "--accept-terms")...)
+func TestSignupCodeBusyAnswersSayToRepeatTheSameCallAndKeepThePendingState(t *testing.T) {
+	for name, arm := range map[string]struct {
+		set  func()
+		code string
+	}{
+		"tool rate limit":  {func() { fake.rateLimits = 1 }, "rate_limited"},
+		"tool unavailable": {func() { fake.unavailable = 1 }, "unavailable"},
+		"rpc rate limit":   {func() { fake.rpcLimits = 1 }, "rate_limited"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			server := newCodeSignup(t)
+			base := []string{"signup", "--profile", "dev", "--url", server.URL}
+			run(t, "", append(base, "--email", "o@example.com", "--accept-terms")...)
 
+			arm.set()
+			_, f := run(t, "", append(base, "--code", testCode)...)
+			if errorCode(f) != arm.code || exitCode(f) != exitNetwork || !strings.Contains(errorMessage(f), "no new code") ||
+				!strings.Contains(errorMessage(f), "spun signup --code <code> --profile dev") {
+				t.Fatalf("got %v", f)
+			}
+			if _, held := pendingFor(t, "dev"); !held {
+				t.Fatal("a busy answer dropped the pending sign-up")
+			}
+			if _, f := run(t, "", append(base, "--code", testCode, "--no-setup")...); f != nil {
+				t.Fatalf("the repeat failed: %v", f)
+			}
+		})
+	}
+}
+
+func TestSignupFirstCallBusyAnswerSaysToRepeatTheSameCommandAndStoresNothing(t *testing.T) {
+	server := newCodeSignup(t)
 	fake.rateLimits = 1
-	_, f := run(t, "", append(base, "--code", testCode)...)
-	if errorCode(f) != "rate_limited" || !strings.Contains(errorMessage(f), "no new code") ||
-		!strings.Contains(errorMessage(f), "spun signup --code <code> --profile dev") {
+	_, f := run(t, "", "signup", "--profile", "dev", "--url", server.URL, "--email", "o@example.com", "--accept-terms")
+	if errorCode(f) != "rate_limited" || !strings.Contains(errorMessage(f), "spun signup --profile dev with the same flags") {
 		t.Fatalf("got %v", f)
 	}
-	if _, held := pendingFor(t, "dev"); !held {
-		t.Fatal("a rate limit dropped the pending sign-up")
+	if _, held := pendingFor(t, "dev"); held {
+		t.Fatal("a refused first call left a pending sign-up")
 	}
-	if _, f := run(t, "", append(base, "--code", testCode, "--no-setup")...); f != nil {
-		t.Fatalf("the repeat failed: %v", f)
+}
+
+func TestSignupRefusalsKeepTheServersCodeAndNextCallAndNameACliCommand(t *testing.T) {
+	server := newCodeSignup(t)
+	base := []string{"signup", "--profile", "dev", "--url", server.URL}
+	start := func() { run(t, "", append(base, "--email", "o@example.com", "--accept-terms")...) }
+
+	start()
+	_, f := run(t, "", append(base, "--code", "000000")...)
+	e := errorField(f)
+	if e["code"] != "invalid_code" || e["next_call"] == nil || strings.Contains(errorMessage(f), "sign_up") ||
+		!strings.Contains(errorMessage(f), "spun signup --code <code> --profile dev") {
+		t.Fatalf("invalid_code: %v", f)
+	}
+
+	_, f = run(t, "", append(base, "--code", testCode, "--handle", "late")...)
+	if errorCode(f) != "validation_failed" || strings.Contains(errorMessage(f), "sign_up") ||
+		!strings.Contains(errorMessage(f), "Handle has already been taken") || errorField(f)["next_call"] == nil {
+		t.Fatalf("validation_failed: %v", f)
+	}
+	if _, held := pendingFor(t, "dev"); !held {
+		t.Fatal("validation_failed dropped the pending sign-up")
+	}
+
+	_, f = run(t, "", append(base, "--code", "changed")...)
+	if errorCode(f) != "terms_changed" || !strings.Contains(errorMessage(f), testNotice) ||
+		!strings.Contains(errorMessage(f), "spun signup") || strings.Contains(errorMessage(f), "sign_up") {
+		t.Fatalf("terms_changed: %v", f)
+	}
+	if _, held := pendingFor(t, "dev"); held {
+		t.Fatal("terms_changed left the pending sign-up behind")
+	}
+
+	for _, code := range []string{"exists", "done"} {
+		start()
+		if _, f := run(t, "", append(base, "--code", code)...); errorCode(f) != map[string]string{"exists": "account_exists", "done": "already_completed"}[code] {
+			t.Fatalf("%s: got %v", code, f)
+		}
+		if _, held := pendingFor(t, "dev"); held {
+			t.Fatalf("%s left the pending sign-up behind", code)
+		}
 	}
 }
 
