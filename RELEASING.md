@@ -5,7 +5,9 @@ uploads anything by hand.
 
 ## Cut a release
 
-1. `main` is green in CI (Linux, macOS, Windows, `govulncheck`, the GoReleaser snapshot).
+1. `main` is green in CI (Linux, macOS, Windows, `govulncheck`, the GoReleaser snapshot, and the
+   skill gate: the embedded skill equals the `skill.pin` tag of `spun-ink/plugins`). To ship a new
+   skill, bump `tag` in `skill.pin` and run `scripts/sync-skill.sh` first.
 2. Pick the version with semver: a fix is a patch, a feature a minor. A tag with a suffix
    (`v0.3.0-rc.1`) becomes a GitHub prerelease: `spun upgrade` and the installers skip it unless
    it is named.

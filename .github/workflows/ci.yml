@@ -31,7 +31,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - run: shellcheck scripts/install.sh
+      - run: shellcheck scripts/install.sh scripts/sync-skill.sh
+      - name: skill equals the pinned plugins tag
+        run: scripts/sync-skill.sh --check
 
   vulncheck:
     runs-on: ubuntu-latest

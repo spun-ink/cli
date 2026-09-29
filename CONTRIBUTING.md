@@ -31,6 +31,10 @@ Keep to what is there:
 - The server's error body passes through untouched; the CLI adds codes only for failures the
   server never saw (usage, configuration, network).
 
+The skill (`cmd/spun/skill/SKILL.md`) is edited in [github.com/spun-ink/plugins](https://github.com/spun-ink/plugins),
+never here: the file is a copy of the tag named in `skill.pin`, and CI fails if it drifts
+(`scripts/sync-skill.sh` re-vendors it).
+
 Releases are cut by the maintainers: [RELEASING.md](RELEASING.md).
 
 ## Pull requests
