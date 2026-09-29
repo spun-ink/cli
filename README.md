@@ -73,7 +73,8 @@ sees it (they ask `spun upgrade --check`). It never installs anything. `CI` or
 The skill follows the binary: after an upgrade or a reinstall, the next command rewrites `SKILL.md`
 wherever `spun setup` put it at an agent's standard location (`~/.claude`, `~/.codex` or
 `$CODEX_HOME`). A skill installed with `spun setup --dir` is refreshed by rerunning that setup, and an
-agent session that has already loaded the skill keeps the old text until it restarts.
+agent session that has already loaded the skill keeps the old text until it restarts. The skill is
+edited in [github.com/spun-ink/plugins](https://github.com/spun-ink/plugins), never here.
 
 ## Getting started
 
