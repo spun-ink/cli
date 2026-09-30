@@ -108,7 +108,7 @@ func storeProfile(name, root, token string) (string, error) {
 	return where, nil
 }
 
-// reportStored finishes login and signup alike: the skill for every agent found unless noSetup,
+// reportStored finishes login: the skill for every agent found unless noSetup,
 // then the reply with its next steps — first, then the login ones.
 func (a *app) reportStored(reply map[string]any, headline string, lines, first []string, noSetup bool) error {
 	name := reply["profile"].(string)
@@ -163,7 +163,7 @@ var agentStart = map[string]string{
 
 const loginExample = "spun login"
 
-const tokenSource = "No account yet? `spun signup` creates one and stores its token. A lost token is replaced at https://spun.ink/recover."
+const tokenSource = "No account yet? `spun signup` opens the sign-up page; the token comes from your account. A lost token is replaced at https://spun.ink/recover."
 
 func tokenNotAnArgument() error {
 	return usage("the token is never an argument (it would land in shell history) — run `%s` "+

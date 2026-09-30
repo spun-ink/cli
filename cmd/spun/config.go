@@ -347,7 +347,7 @@ func resolve(profileFlag string) (*Client, error) {
 // stored profiles are listed, since naming them is not using one.
 func noServerNamed(config *Config) string {
 	if len(config.Profiles) == 0 {
-		return "not logged in — run `spun signup` for a new account or `spun login` to paste your token, " +
+		return "not logged in — run `spun signup` to open the sign-up page, then `spun login` to paste your token, " +
 			"or set SPUN_URL and SPUN_TOKEN"
 	}
 	return fmt.Sprintf("not logged in to %s — run `spun login`, or pass --profile <name> or set SPUN_PROFILE; "+

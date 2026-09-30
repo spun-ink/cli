@@ -52,4 +52,4 @@ if (-not (($userPath -split ';') -contains $installDir)) {
   [Environment]::SetEnvironmentVariable('Path', "$userPath;$installDir", 'User')
   Write-Host "Added $installDir to your user PATH - open a new terminal to use it."
 }
-Write-Host 'Next: spun signup (a new account) or spun login (an existing one).'
+Write-Host 'Next: spun signup (opens the sign-up page for a new account), then spun login.'

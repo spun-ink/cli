@@ -53,8 +53,13 @@ release:
     notarized: an archive downloaded with a browser needs `xattr -d com.apple.quarantine spun` once;
     the install scripts do not.
 
-    Then `spun signup` for a new account, or `spun login` for an existing one. Later,
-    `spun upgrade` updates an installed release in place.
+    Then `spun signup` opens the sign-up page for a new account, and `spun login` stores your
+    token. Later, `spun upgrade` updates an installed release in place.
+
+    **Sign-up moved to the browser.** `spun signup` no longer creates an account from the shell.
+    v0.4 and v0.5 fail at their next `spun signup`, or when continuing a pending one: upgrade with
+    `spun upgrade` or the install script, or sign up at https://spun.ink/signup and run
+    `spun login`. Commands with a stored token keep working.
 
 changelog:
   use: github-native

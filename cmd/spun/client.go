@@ -43,7 +43,7 @@ func (c *Client) send(method, target string, body []byte, contentType string) (*
 	}
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("User-Agent", "spun-cli/"+version)
-	// The upload URL is signed; the bearer token goes only to /mcp. Only signup's client has none.
+	// The upload URL is signed; the bearer token goes only to /mcp.
 	if method == http.MethodPost {
 		if c.Token != "" {
 			req.Header.Set("Authorization", "Bearer "+c.Token)
