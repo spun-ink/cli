@@ -5,16 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 )
-
-// termsMetaKey names the terms sign_up carries in its tools/list _meta: the sentence the human
-// accepts is the server's, never a copy in this binary.
-const termsMetaKey = "ink.spun/terms"
 
 // exitCodeSent: sign-up is half done — the code is in the owner's mail, and `spun signup --code`
 // finishes it. Distinct from every failure, so an agent's shell can tell "ask the owner" from "broken".
@@ -57,7 +54,7 @@ func (a *app) signupCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// Checked before anything is sent: a second sign_up is a second, separate account.
+			// Checked before anything is sent: a second sign-up is a second, separate account.
 			config, err := loadConfig()
 			if err != nil {
 				return err
@@ -101,25 +98,21 @@ func (a *app) signupCmd() *cobra.Command {
 					"once they agree; the code they then read from their mail is their acceptance — %s", notice)
 			}
 
-			args := map[string]any{"email": details.email}
+			args := map[string]any{"email": details.email,
+				"terms_version": terms["terms_version"], "terms_content_hash": terms["terms_content_hash"]}
 			if details.name != "" {
 				args["name"] = details.name
 			}
 			if details.handle != "" {
 				args["handle"] = details.handle
 			}
-			result, err := c.call("sign_up", args)
+			fields, err := c.signupRequest(http.MethodPost, "/cli/signup", args)
 			if err != nil {
 				return signupFailure(err, name, "spun signup"+profileFlag(name)+" with the same flags", false)
 			}
-			fields, _ := result.(map[string]any)
-			if token, _ := fields["bearer_token"].(string); token != "" {
-				// A server from before the code switch: one call, the token comes back at once.
-				return a.storeSignup(name, root, details.email, fields, noSetup)
-			}
 			handle, _ := fields["signup"].(string)
 			if fields["status"] != "code_sent" || handle == "" {
-				return fail(exitNetwork, "bad_response", "sign_up returned neither a code_sent status nor a bearer_token")
+				return fail(exitNetwork, "bad_response", "/cli/signup did not answer with a code_sent status")
 			}
 			pending = pendingSignup{Signup: handle, URL: root, Email: details.email,
 				Expires: time.Now().Add(time.Duration(numberOr(fields["signup_expires_in"], 900)) * time.Second).Unix()}
@@ -228,7 +221,7 @@ func normalizeCode(s string) string {
 	}, s)
 }
 
-// failCode is the error code of a Fail: a tool's ("invalid_code") or a JSON-RPC one ("-32002").
+// failCode is the error code of a Fail: the route's ("invalid_code") or the client's ("http_error").
 func failCode(err error) string {
 	if e := errorField(err); e != nil {
 		if code, ok := e["code"]; ok {
@@ -249,11 +242,11 @@ func errorField(err error) map[string]any {
 	return e
 }
 
-// isBusy: the server declined this attempt and consumed nothing — a rate limit (a tool refusal, an
-// HTTP 429 or a JSON-RPC -32002) or a brief outage. The same call works later, with no new code.
+// isBusy: the server declined this attempt and consumed nothing — a rate limit (a refusal or an
+// HTTP 429) or a brief outage. The same call works later, with no new code.
 func isBusy(err error) bool {
 	switch failCode(err) {
-	case "rate_limited", "unavailable", "-32002":
+	case "rate_limited", "unavailable":
 		return true
 	case "http_error":
 		return strings.Contains(asFail(err).message(), "HTTP 429")
@@ -261,8 +254,8 @@ func isBusy(err error) bool {
 	return false
 }
 
-// worded keeps a refusal's body, its code and its next_call, and replaces the message by one that
-// names a CLI command: the server's sentences tell an agent which tool to call.
+// worded keeps a refusal's body and its code, and replaces the message by one that names a CLI
+// command: the server's sentences describe the route, not the CLI.
 func worded(err error, message string) *Fail {
 	f := asFail(err)
 	body, _ := f.Body.(map[string]any)
@@ -279,7 +272,7 @@ func worded(err error, message string) *Fail {
 	return &Fail{f.Code, out}
 }
 
-// signupFailure finishes a refused sign_up call. Busy answers say to repeat the same command, with
+// signupFailure finishes a refused sign-up call. Busy answers say to repeat the same command, with
 // no new code. Refusals nothing can continue from clear the pending state; a wrong code or a refused
 // name or handle keeps it, because the row is still open. retry is the command that repeats the call;
 // continuing is true for call 2, the only call that has a sign-up to keep.
@@ -289,11 +282,7 @@ func signupFailure(err error, profile, retry string, continuing bool) error {
 		if failCode(err) == "unavailable" {
 			what, code = "briefly unavailable", "unavailable"
 		}
-		out := fail(exitNetwork, code, what+" — nothing was consumed and no new code is needed; wait a little and repeat `"+retry+"`")
-		if e := errorField(err); e != nil && e["next_call"] != nil {
-			out.Body.(map[string]any)["error"].(map[string]any)["next_call"] = e["next_call"]
-		}
-		return out
+		return fail(exitNetwork, code, what+" — nothing was consumed and no new code is needed; wait a little and repeat `"+retry+"`")
 	}
 	switch failCode(err) {
 	case "terms_changed":
@@ -321,7 +310,7 @@ func signupFailure(err error, profile, retry string, continuing bool) error {
 	return err
 }
 
-// completeSignup is call 2, with the flags' corrections folded in.
+// completeSignup is call 2, POST /cli/signup/complete, with the flags' corrections folded in.
 func (c *Client) completeSignup(profile string, args map[string]any, d signupDetails) (map[string]any, error) {
 	if d.name != "" {
 		args["name"] = d.name
@@ -329,13 +318,12 @@ func (c *Client) completeSignup(profile string, args map[string]any, d signupDet
 	if d.handle != "" {
 		args["handle"] = d.handle
 	}
-	result, err := c.call("sign_up", args)
+	fields, err := c.signupRequest(http.MethodPost, "/cli/signup/complete", args)
 	if err != nil {
 		return nil, signupFailure(err, profile, "spun signup --code <code>"+profileFlag(profile), true)
 	}
-	fields, _ := result.(map[string]any)
 	if token, _ := fields["bearer_token"].(string); token == "" {
-		return nil, fail(exitNetwork, "bad_response", "sign_up returned no bearer_token")
+		return nil, fail(exitNetwork, "bad_response", "/cli/signup/complete returned no bearer_token")
 	}
 	return fields, nil
 }
@@ -476,25 +464,16 @@ func confirm(input *bufio.Reader, prompt string) bool {
 	return err == nil && (answer == "y" || answer == "yes")
 }
 
-// signUpTerms reads the terms from the tokenless tools/list, which lists sign_up plus whatever
-// tools an account-wide OAuth grant can call; it finds sign_up by name.
+// signUpTerms reads the terms from GET /cli/signup: the sentence the human accepts is the server's,
+// never a copy in this binary, and its version and hash stamp the sign-up that follows.
 func (c *Client) signUpTerms() (map[string]any, error) {
-	result, err := c.rpc("tools/list", map[string]any{})
+	terms, err := c.signupRequest(http.MethodGet, "/cli/signup", nil)
 	if err != nil {
 		return nil, err
 	}
-	tools, _ := result["tools"].([]any)
-	for _, entry := range tools {
-		tool, _ := entry.(map[string]any)
-		if tool["name"] != "sign_up" {
-			continue
-		}
-		meta, _ := tool["_meta"].(map[string]any)
-		terms, _ := meta[termsMetaKey].(map[string]any)
-		if notice, _ := terms["notice"].(string); notice != "" {
-			return terms, nil
-		}
+	if notice, _ := terms["notice"].(string); notice == "" {
+		return nil, fail(exitNetwork, "bad_response", c.URL+" does not publish the sign-up terms — "+
+			"nothing was sent; sign up at "+c.URL+"/signup instead")
 	}
-	return nil, fail(exitNetwork, "bad_response", c.URL+" does not publish the sign-up terms — "+
-		"nothing was sent; sign up at "+c.URL+"/signup instead")
+	return terms, nil
 }

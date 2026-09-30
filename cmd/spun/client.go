@@ -36,19 +36,22 @@ type Client struct {
 	Token string
 }
 
-func (c *Client) send(method, target string, body []byte, contentType string) (*http.Response, []byte, error) {
+// send makes one request. An empty contentType or accept sets no such header. The upload URL is
+// signed; the bearer token goes only to POSTs, and the sign-up client has none.
+func (c *Client) send(method, target string, body []byte, contentType, accept string) (*http.Response, []byte, error) {
 	req, err := http.NewRequest(method, target, bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, fail(exitConfig, "config_invalid", err.Error())
 	}
-	req.Header.Set("Content-Type", contentType)
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	if accept != "" {
+		req.Header.Set("Accept", accept)
+	}
 	req.Header.Set("User-Agent", "spun-cli/"+version)
-	// The upload URL is signed; the bearer token goes only to /mcp. Only signup's client has none.
-	if method == http.MethodPost {
-		if c.Token != "" {
-			req.Header.Set("Authorization", "Bearer "+c.Token)
-		}
-		req.Header.Set("Accept", "application/json, text/event-stream")
+	if method == http.MethodPost && c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -82,7 +85,7 @@ func withoutQuery(raw string) string {
 
 func (c *Client) rpc(method string, params any) (map[string]any, error) {
 	body := marshalJSON(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
-	resp, text, err := c.send(http.MethodPost, c.URL+"/mcp", body, "application/json")
+	resp, text, err := c.send(http.MethodPost, c.URL+"/mcp", body, "application/json", "application/json, text/event-stream")
 	if err != nil {
 		return nil, err
 	}
@@ -120,6 +123,37 @@ func rpcErrorExit(rpcErr any) int {
 		return exitUsage
 	}
 	return exitNetwork
+}
+
+// signupRequest is one call to the server's plain-JSON sign-up route, which needs no token. A
+// refusal ({"ok": false, "error": {...}}) is a *Fail shaped like a tool's, so the sign-up code reads
+// both alike; a server without the route answers 404.
+func (c *Client) signupRequest(method, path string, body map[string]any) (map[string]any, error) {
+	var payload []byte
+	contentType := ""
+	if body != nil {
+		payload, contentType = marshalJSON(body), "application/json"
+	}
+	resp, text, err := c.send(method, c.URL+path, payload, contentType, "application/json")
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fail(exitNetwork, "signup_unavailable", c.URL+" does not offer sign-up from the terminal — sign up at "+
+			c.URL+"/signup, then run `spun login`")
+	}
+	var reply map[string]any
+	structured := json.Unmarshal(text, &reply) == nil
+	if _, refused := reply["error"].(map[string]any); structured && refused && reply["ok"] == false {
+		return nil, &Fail{exitToolError, reply}
+	}
+	if resp.StatusCode >= 300 {
+		return nil, fail(exitNetwork, "http_error", fmt.Sprintf("HTTP %d: %s", resp.StatusCode, firstLine(text)))
+	}
+	if !structured {
+		return nil, fail(exitNetwork, "bad_response", "not a JSON object: "+firstLine(text))
+	}
+	return reply, nil
 }
 
 func (c *Client) call(tool string, args map[string]any) (any, error) {
@@ -223,7 +257,7 @@ func (c *Client) upload(path, alt, title, site string) (any, error) {
 			"create_upload_link pointed at %s, not at %s — the file was not sent", withoutQuery(target), c.URL))
 	}
 
-	resp, text, err := c.send(http.MethodPut, target, data, "application/octet-stream")
+	resp, text, err := c.send(http.MethodPut, target, data, "application/octet-stream", "")
 	if err != nil {
 		return nil, err
 	}

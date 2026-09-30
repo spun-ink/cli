@@ -106,7 +106,7 @@ through this plugin.
 - **Use the connected spun.ink tools only.** Find them in your tool list — the app may put a
   connector prefix in front of each name; match on the tool name (`site_map`, `publish_content`).
   Do not assume one namespace.
-- **Never run CLI setup, never ask for a bearer token, never call `sign_up`** — and in a code
+- **Never run CLI setup, never ask for a bearer token** — and in a code
   sandbox never install `spun`, sign up or log in with it. The owner's account is created or opened
   in the spun.ink sign-in window when they connect; no token ever enters the chat. If a token is pasted anyway, tell the owner to open https://spun.ink/recover and replace it.
 - **The tools are missing?** Tell the owner to add the connector. In Claude: Settings → Customize →
@@ -178,8 +178,8 @@ The token is stored as profile `spun.ink`, never shown. The account is verified 
 accepted; there is no confirmation email to click. `invalid_code` (exit 1): wrong or expired code —
 ask the owner again, or start over with `spun signup`. `validation_failed` (a taken handle): repeat
 `--code` with another `--name`/`--handle`, no new code. `rate_limited` (exit 4): wait, then repeat
-the same command. Exit 3 means the server rejected the token: send the owner to `/recover`, do not
-retry with guesses.
+the same command. Exit 4 `signup_unavailable` means this server has no terminal sign-up: the owner
+signs up at https://spun.ink/signup, then runs `spun login` in their own terminal.
 
 ### Learn a tool before you call it
 

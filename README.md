@@ -107,6 +107,9 @@ edited in [github.com/spun-ink/plugins](https://github.com/spun-ink/plugins), ne
    lapsed (15 minutes) or the code is dead, start over with `spun signup`. A `spun` from before
    this change cannot finish a sign-up: update it first (`spun upgrade`).
 
+   `spun signup` talks to the server's sign-up route (`/cli/signup`), not to MCP. Against a server
+   without it, `signup` exits 4 `signup_unavailable`: sign up at `/signup`, then run `spun login`.
+
    **An existing account** — log in. The token is read from a no-echo prompt (or stdin), never from
    an argument, so it never lands in shell history. Lost it? https://spun.ink/recover.
 

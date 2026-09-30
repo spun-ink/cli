@@ -20,12 +20,13 @@ import (
 // toolArgs holds the arguments of the latest call fakeServer answered, per tool.
 var toolArgs map[string]map[string]any
 
-// fakeServer answers /mcp like the spun server: 401 for any token but "good", a tool reply for
-// tools/call, a scoped tools/list per token.
+// fakeServer answers /mcp like the spun server: 401 for any token but "good" and for every
+// tokenless request, a tool reply for tools/call, a scoped tools/list per token. The sign-up route
+// answers beside it, without a token.
 func fakeServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	toolArgs = map[string]map[string]any{}
-	fake.legacy, fake.rateLimits, fake.proven, fake.calls = false, 0, false, nil
+	fake = fakeSteer{}
 	signUpCalls = 0
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -39,8 +40,12 @@ func fakeServer(t *testing.T) *httptest.Server {
 			_, _ = w.Write([]byte(`{"ok":true,"key":"logo","bytes":` + jsonNumber(len(body)) + `}`))
 			return
 		}
+		if strings.HasPrefix(r.URL.Path, "/cli/signup") {
+			cliSignup(w, r)
+			return
+		}
 		if _, has := r.Header["Authorization"]; !has {
-			tokenless(w, r)
+			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -123,7 +128,7 @@ func fakeServer(t *testing.T) *httptest.Server {
 
 const testNotice = "By creating an account, you agree to our Terms of Service (https://x/legal/terms)."
 
-// signUpCalls counts the tokenless sign_up calls fakeServer has answered.
+// signUpCalls counts the POSTs to the sign-up route fakeServer has answered.
 var signUpCalls int
 
 const (
@@ -131,107 +136,106 @@ const (
 	testCode   = "482913"
 )
 
-// fake steers the tokenless sign_up: legacy answers the one-call server from before the code
-// switch; rateLimits and unavailable refuse that many calls the way the tool does (an isError result
-// with the code rate_limited or unavailable), rpcLimits with JSON-RPC -32002; proven marks the code
-// accepted.
-// fakeServer resets it, so a test sets it after starting the server.
-var fake struct {
-	legacy      bool
+// fakeSteer steers the sign-up route: rateLimits and unavailable refuse that many POSTs (429 and 503
+// with the route's error envelope), plain429 that many with a bare 429; noRoute makes the server one
+// without the route (404); proven marks the code accepted; authorized records that any request to
+// the route carried an Authorization header. fakeServer resets it, so a test sets it after starting
+// the server.
+type fakeSteer struct {
 	rateLimits  int
 	unavailable int
-	rpcLimits   int
+	plain429    int
+	noRoute     bool
 	proven      bool
+	authorized  bool
+	gets        int
 	calls       []map[string]any
 }
 
-// tokenless answers like the bootstrap surface: tools/list names sign_up alone with its terms, and
-// sign_up refuses the handle "taken". Anything else is a 401, so a leaked tokenless call fails loudly.
-func tokenless(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Method string `json:"method"`
-		Params struct {
-			Name      string         `json:"name"`
-			Arguments map[string]any `json:"arguments"`
-		} `json:"params"`
+var fake fakeSteer
+
+// cliSignup answers the plain-JSON sign-up route: GET /cli/signup names the terms, POST /cli/signup
+// sends the code (and refuses the handle "taken"), POST /cli/signup/complete checks it.
+func cliSignup(w http.ResponseWriter, r *http.Request) {
+	if _, has := r.Header["Authorization"]; has {
+		fake.authorized = true
 	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
-	reply := func(result any) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": 1, "result": result})
+	if fake.noRoute {
+		http.NotFound(w, r)
+		return
 	}
+	send := func(status int, payload map[string]any) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		enc := json.NewEncoder(w)
+		enc.SetEscapeHTML(false)
+		_ = enc.Encode(payload)
+	}
+	refuse := func(status int, code, message string, extra ...map[string]any) {
+		e := map[string]any{"code": code, "message": message}
+		for _, more := range extra {
+			for k, v := range more {
+				e[k] = v
+			}
+		}
+		send(status, map[string]any{"ok": false, "error": e})
+	}
+	if r.Method == http.MethodGet {
+		fake.gets++
+		send(http.StatusOK, map[string]any{"notice": testNotice, "terms_url": "https://x/legal/terms",
+			"privacy_url": "https://x/legal/privacy", "terms_version": "2026-09-01", "terms_content_hash": "abc123"})
+		return
+	}
+	if r.Header.Get("Content-Type") != "application/json" {
+		refuse(http.StatusUnsupportedMediaType, "invalid_argument", "send JSON")
+		return
+	}
+	var args map[string]any
+	_ = json.NewDecoder(r.Body).Decode(&args)
+	signUpCalls++
+	fake.calls = append(fake.calls, args)
 	switch {
-	case req.Method == "tools/list":
-		terms := map[string]any{"notice": testNotice, "terms_version": "2026-09-01", "terms_content_hash": "abc123"}
-		reply(map[string]any{"tools": []any{map[string]any{"name": "sign_up", "description": "Sign up.",
-			"_meta": map[string]any{termsMetaKey: terms}}}})
-	case req.Method == "tools/call" && req.Params.Name == "sign_up":
-		signUpCalls++
-		args := req.Params.Arguments
-		fake.calls = append(fake.calls, args)
-		tool := func(payload map[string]any) {
-			text, _ := json.Marshal(payload)
-			_, isError := payload["error"]
-			reply(map[string]any{"content": []any{map[string]any{"type": "text", "text": string(text)}}, "isError": isError})
+	case fake.plain429 > 0:
+		fake.plain429--
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte("Retry later"))
+	case fake.rateLimits > 0:
+		fake.rateLimits--
+		refuse(http.StatusTooManyRequests, "rate_limited", "Too many code checks for this address — wait up to an hour, then try again.")
+	case fake.unavailable > 0:
+		fake.unavailable--
+		refuse(http.StatusServiceUnavailable, "unavailable", "Sign-up is briefly unavailable and nothing changed — try again in a minute.")
+	case r.URL.Path == "/cli/signup":
+		if args["terms_version"] != "2026-09-01" || args["terms_content_hash"] != "abc123" {
+			refuse(http.StatusConflict, "terms_changed", "The Terms of Service changed.", map[string]any{"notice": testNotice})
+			return
 		}
-		next := map[string]any{"tool": "sign_up", "arguments": map[string]any{"signup": testSignup}}
-		refuse := func(code, message string, extra ...map[string]any) {
-			e := map[string]any{"code": code, "message": message}
-			for _, more := range extra {
-				for k, v := range more {
-					e[k] = v
-				}
-			}
-			tool(map[string]any{"ok": false, "error": e})
+		if args["handle"] == "taken" {
+			refuse(http.StatusUnprocessableEntity, "validation_failed", "Handle has already been taken",
+				map[string]any{"errors": []any{"Handle has already been taken"}})
+			return
 		}
-		success := map[string]any{"ok": true, "bearer_token": "good",
-			"site":  map[string]any{"handle": "bakery", "url": "https://bakery.myspun.ink"},
-			"legal": map[string]any{"terms_version": "2026-09-01", "terms_content_hash": "abc123"}}
-		switch {
-		case fake.legacy && args["handle"] == "taken":
-			refuse("validation_failed", "Handle has already been taken")
-		case fake.legacy:
-			tool(success)
-		case fake.rateLimits > 0:
-			fake.rateLimits--
-			refuse("rate_limited", "Too many code checks for this address — wait up to an hour, then call sign_up with signup and code again.",
-				map[string]any{"next_call": next})
-		case fake.unavailable > 0:
-			fake.unavailable--
-			refuse("unavailable", "Sign-up is briefly unavailable and nothing changed — make the same call again in a minute.",
-				map[string]any{"next_call": next})
-		case fake.rpcLimits > 0:
-			fake.rpcLimits--
-			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": 1,
-				"error": map[string]any{"code": -32002, "message": "rate limited"}})
-		case args["email"] != nil:
-			if args["handle"] == "taken" {
-				refuse("validation_failed", "Handle has already been taken Call sign_up with email and a different name or handle — no code was sent.",
-					map[string]any{"errors": []any{"Handle has already been taken"},
-						"next_call": map[string]any{"tool": "sign_up", "arguments": map[string]any{"email": args["email"]}}})
-				return
-			}
-			tool(map[string]any{"status": "code_sent", "signup": testSignup, "email": args["email"],
-				"code_expires_in": 600, "signup_expires_in": 900, "next_step": "Ask the owner."})
-		case args["code"] == "exists":
-			refuse("account_exists", "This address already has a spun.ink account, so nothing was created.")
-		case args["code"] == "changed":
-			refuse("terms_changed", "The Terms of Service changed after the code was mailed.",
-				map[string]any{"notice": testNotice, "next_call": map[string]any{"tool": "sign_up", "arguments": map[string]any{"email": "o@example.com"}}})
-		case args["code"] == "done":
-			refuse("already_completed", "This sign-up already created its account and issued its bearer token, once.")
-		case args["signup"] != testSignup:
-			refuse("invalid_code", "The code is wrong or no longer valid.", map[string]any{"next_call": next})
-		case !fake.proven && normalizeCode(fmt.Sprint(args["code"])) != testCode:
-			refuse("invalid_code", "The code is wrong or no longer valid.", map[string]any{"next_call": next})
-		case args["handle"] == "late":
-			fake.proven = true
-			refuse("validation_failed", "Handle has already been taken The sign-up is kept: call sign_up with signup and a corrected name or handle — no code needed.",
-				map[string]any{"errors": []any{"Handle has already been taken"}, "next_call": next})
-		default:
-			tool(success)
-		}
+		send(http.StatusOK, map[string]any{"ok": true, "status": "code_sent", "signup": testSignup, "email": args["email"],
+			"code_expires_in": 600, "signup_expires_in": 900, "next_step": "Ask the owner."})
+	case args["code"] == "exists":
+		refuse(http.StatusConflict, "account_exists", "This address already has a spun.ink account, so nothing was created.")
+	case args["code"] == "changed":
+		refuse(http.StatusConflict, "terms_changed", "The Terms of Service changed after the code was mailed.",
+			map[string]any{"notice": testNotice})
+	case args["code"] == "done":
+		refuse(http.StatusConflict, "already_completed", "This sign-up already created its account and issued its bearer token, once.")
+	case args["signup"] != testSignup:
+		refuse(http.StatusUnprocessableEntity, "invalid_code", "The code is wrong or no longer valid.")
+	case !fake.proven && normalizeCode(fmt.Sprint(args["code"])) != testCode:
+		refuse(http.StatusUnprocessableEntity, "invalid_code", "The code is wrong or no longer valid.")
+	case args["handle"] == "late":
+		fake.proven = true
+		refuse(http.StatusUnprocessableEntity, "validation_failed", "Handle has already been taken",
+			map[string]any{"errors": []any{"Handle has already been taken"}})
 	default:
-		w.WriteHeader(http.StatusUnauthorized)
+		send(http.StatusCreated, map[string]any{"ok": true, "bearer_token": "good",
+			"site":  map[string]any{"handle": "bakery", "url": "https://bakery.myspun.ink"},
+			"legal": map[string]any{"terms_version": "2026-09-01", "terms_content_hash": "abc123"}})
 	}
 }
 

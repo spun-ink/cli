@@ -11,15 +11,16 @@ import (
 	"github.com/zalando/go-keyring"
 )
 
-func TestSignupAgainstAServerBeforeTheCodeSwitchStoresTheTokenFromOneCallAndTheNextCommandReachesIt(t *testing.T) {
+func TestSignupStoresTheTokenAfterTheCodeAndTheNextCommandReachesIt(t *testing.T) {
 	isolate(t)
 	server := fakeServer(t)
-	fake.legacy = true
 	defaultServer = server.URL
-	signUpCalls = 0
 
-	value, f := run(t, "", "signup", "--email", "owner@example.com", "--accept-terms", "--no-setup")
-	if f != nil || signUpCalls != 1 {
+	if _, f := run(t, "", "signup", "--email", "owner@example.com", "--accept-terms", "--no-setup"); f != nil {
+		t.Fatal(f)
+	}
+	value, f := run(t, "", "signup", "--code", testCode, "--no-setup")
+	if f != nil || signUpCalls != 2 {
 		t.Fatalf("got %v, %v after %d calls", value, f, signUpCalls)
 	}
 	reply := value.(map[string]any)
@@ -38,13 +39,44 @@ func TestSignupAgainstAServerBeforeTheCodeSwitchStoresTheTokenFromOneCallAndTheN
 	}
 }
 
+func TestSignupSendsTheTermsStampItWasShownAndNeverAToken(t *testing.T) {
+	server := newCodeSignup(t)
+	if _, f := run(t, "", "signup", "--profile", "dev", "--url", server.URL, "--email", "o@example.com", "--accept-terms"); f != nil {
+		t.Fatal(f)
+	}
+	if _, f := run(t, "", "signup", "--profile", "dev", "--code", testCode, "--no-setup"); f != nil {
+		t.Fatal(f)
+	}
+	if fake.gets != 1 || fake.calls[0]["terms_version"] != "2026-09-01" || fake.calls[0]["terms_content_hash"] != "abc123" {
+		t.Fatalf("gets %d, calls %v", fake.gets, fake.calls)
+	}
+	if fake.authorized {
+		t.Fatal("a sign-up request carried an Authorization header")
+	}
+}
+
+func TestSignupAgainstAServerWithoutTheRouteSaysSoAndSendsNothing(t *testing.T) {
+	server := newCodeSignup(t)
+	fake.noRoute = true
+	_, f := run(t, "", "signup", "--profile", "dev", "--url", server.URL, "--email", "o@example.com", "--accept-terms")
+	if exitCode(f) != exitNetwork || errorCode(f) != "signup_unavailable" || signUpCalls != 0 ||
+		!strings.Contains(errorMessage(f), server.URL+"/signup") || !strings.Contains(errorMessage(f), "spun login") {
+		t.Fatalf("got %v after %d calls", f, signUpCalls)
+	}
+	if _, held := pendingFor(t, "dev"); held {
+		t.Fatal("a server without the route left a pending sign-up")
+	}
+}
+
 func TestSignupNeverShowsTheToken(t *testing.T) {
 	isolate(t)
 	server := fakeServer(t)
-	fake.legacy = true
 	var out bytes.Buffer
 	a := &app{stdin: stdinWith(t, ""), stdout: &out, bobbin: true}
 	if _, err := a.run([]string{"signup", "--profile", "dev", "--url", server.URL, "--email", "o@example.com", "--accept-terms", "--no-setup"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.run([]string{"signup", "--profile", "dev", "--code", testCode, "--no-setup"}); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(out.String(), "good") || !strings.Contains(out.String(), "Signed up.") {
@@ -118,7 +150,6 @@ func TestSignupFirstCallValidationFailureSaysNoCodeWasSentEvenWithAnOlderSignUpP
 func TestSignupKeepsADevServerOutOfTheDefaultProfile(t *testing.T) {
 	isolate(t)
 	server := fakeServer(t)
-	fake.legacy = true
 	for _, argv := range [][]string{
 		{"signup", "--url", server.URL, "--email", "o@example.com", "--accept-terms"},
 		{"signup", "--profile", defaultProfile, "--url", server.URL, "--email", "o@example.com", "--accept-terms"},
@@ -133,7 +164,7 @@ func TestSignupKeepsADevServerOutOfTheDefaultProfile(t *testing.T) {
 	}
 }
 
-func TestOnlySignupGoesOutWithoutAToken(t *testing.T) {
+func TestATokenlessMcpRequestIsRefused(t *testing.T) {
 	isolate(t)
 	server := fakeServer(t)
 	t.Setenv("SPUN_URL", server.URL)
@@ -309,9 +340,9 @@ func TestSignupCodeBusyAnswersSayToRepeatTheSameCallAndKeepThePendingState(t *te
 		set  func()
 		code string
 	}{
-		"tool rate limit":  {func() { fake.rateLimits = 1 }, "rate_limited"},
-		"tool unavailable": {func() { fake.unavailable = 1 }, "unavailable"},
-		"rpc rate limit":   {func() { fake.rpcLimits = 1 }, "rate_limited"},
+		"rate limit":  {func() { fake.rateLimits = 1 }, "rate_limited"},
+		"unavailable": {func() { fake.unavailable = 1 }, "unavailable"},
+		"bare 429":    {func() { fake.plain429 = 1 }, "rate_limited"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			server := newCodeSignup(t)
@@ -346,7 +377,7 @@ func TestSignupFirstCallBusyAnswerSaysToRepeatTheSameCommandAndStoresNothing(t *
 	}
 }
 
-func TestSignupRefusalsKeepTheServersCodeAndNextCallAndNameACliCommand(t *testing.T) {
+func TestSignupRefusalsKeepTheServersCodeAndNameACliCommand(t *testing.T) {
 	server := newCodeSignup(t)
 	base := []string{"signup", "--profile", "dev", "--url", server.URL}
 	start := func() { run(t, "", append(base, "--email", "o@example.com", "--accept-terms")...) }
@@ -354,14 +385,14 @@ func TestSignupRefusalsKeepTheServersCodeAndNextCallAndNameACliCommand(t *testin
 	start()
 	_, f := run(t, "", append(base, "--code", "000000")...)
 	e := errorField(f)
-	if e["code"] != "invalid_code" || e["next_call"] == nil || strings.Contains(errorMessage(f), "sign_up") ||
+	if e["code"] != "invalid_code" || strings.Contains(errorMessage(f), "sign_up") ||
 		!strings.Contains(errorMessage(f), "spun signup --code <code> --profile dev") {
 		t.Fatalf("invalid_code: %v", f)
 	}
 
 	_, f = run(t, "", append(base, "--code", testCode, "--handle", "late")...)
 	if errorCode(f) != "validation_failed" || strings.Contains(errorMessage(f), "sign_up") ||
-		!strings.Contains(errorMessage(f), "Handle has already been taken") || errorField(f)["next_call"] == nil {
+		!strings.Contains(errorMessage(f), "Handle has already been taken") {
 		t.Fatalf("validation_failed: %v", f)
 	}
 	if _, held := pendingFor(t, "dev"); !held {
