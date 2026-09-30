@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -19,11 +20,14 @@ import (
 // toolArgs holds the arguments of the latest call fakeServer answered, per tool.
 var toolArgs map[string]map[string]any
 
-// fakeServer answers /mcp like the spun server: 401 for any token but "good", a tool reply for
-// tools/call, a scoped tools/list per token.
+// fakeServer answers /mcp like the spun server: 401 for any token but "good" and for every
+// tokenless request, a tool reply for tools/call, a scoped tools/list per token. The sign-up route
+// answers beside it, without a token.
 func fakeServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	toolArgs = map[string]map[string]any{}
+	fake = fakeSteer{}
+	signUpCalls = 0
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPut {
@@ -34,6 +38,10 @@ func fakeServer(t *testing.T) *httptest.Server {
 				return
 			}
 			_, _ = w.Write([]byte(`{"ok":true,"key":"logo","bytes":` + jsonNumber(len(body)) + `}`))
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/cli/signup") {
+			cliSignup(w, r)
 			return
 		}
 		if _, has := r.Header["Authorization"]; !has {
@@ -116,6 +124,119 @@ func fakeServer(t *testing.T) *httptest.Server {
 	}))
 	t.Cleanup(server.Close)
 	return server
+}
+
+const testNotice = "By creating an account, you agree to our Terms of Service (https://x/legal/terms)."
+
+// signUpCalls counts the POSTs to the sign-up route fakeServer has answered.
+var signUpCalls int
+
+const (
+	testSignup = "quiet-otter-1"
+	testCode   = "482913"
+)
+
+// fakeSteer steers the sign-up route: rateLimits and unavailable refuse that many POSTs (429 and 503
+// with the route's error envelope), plain429 that many with a bare 429; noRoute makes the server one
+// without the route (404); proven marks the code accepted; authorized records that any request to
+// the route carried an Authorization header. fakeServer resets it, so a test sets it after starting
+// the server.
+type fakeSteer struct {
+	rateLimits  int
+	unavailable int
+	plain429    int
+	noRoute     bool
+	proven      bool
+	authorized  bool
+	gets        int
+	calls       []map[string]any
+}
+
+var fake fakeSteer
+
+// cliSignup answers the plain-JSON sign-up route: GET /cli/signup names the terms, POST /cli/signup
+// sends the code (and refuses the handle "taken"), POST /cli/signup/complete checks it.
+func cliSignup(w http.ResponseWriter, r *http.Request) {
+	if _, has := r.Header["Authorization"]; has {
+		fake.authorized = true
+	}
+	if fake.noRoute {
+		http.NotFound(w, r)
+		return
+	}
+	send := func(status int, payload map[string]any) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		enc := json.NewEncoder(w)
+		enc.SetEscapeHTML(false)
+		_ = enc.Encode(payload)
+	}
+	refuse := func(status int, code, message string, extra ...map[string]any) {
+		e := map[string]any{"code": code, "message": message}
+		for _, more := range extra {
+			for k, v := range more {
+				e[k] = v
+			}
+		}
+		send(status, map[string]any{"ok": false, "error": e})
+	}
+	if r.Method == http.MethodGet {
+		fake.gets++
+		send(http.StatusOK, map[string]any{"notice": testNotice, "terms_url": "https://x/legal/terms",
+			"privacy_url": "https://x/legal/privacy", "terms_version": "2026-09-01", "terms_content_hash": "abc123"})
+		return
+	}
+	if r.Header.Get("Content-Type") != "application/json" {
+		refuse(http.StatusUnsupportedMediaType, "invalid_argument", "send JSON")
+		return
+	}
+	var args map[string]any
+	_ = json.NewDecoder(r.Body).Decode(&args)
+	signUpCalls++
+	fake.calls = append(fake.calls, args)
+	switch {
+	case fake.plain429 > 0:
+		fake.plain429--
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte("Retry later"))
+	case fake.rateLimits > 0:
+		fake.rateLimits--
+		refuse(http.StatusTooManyRequests, "rate_limited", "Too many code checks for this address — wait up to an hour, then try again.")
+	case fake.unavailable > 0:
+		fake.unavailable--
+		refuse(http.StatusServiceUnavailable, "unavailable", "Sign-up is briefly unavailable and nothing changed — try again in a minute.")
+	case r.URL.Path == "/cli/signup":
+		if args["terms_version"] != "2026-09-01" || args["terms_content_hash"] != "abc123" {
+			refuse(http.StatusConflict, "terms_changed", "The Terms of Service changed.", map[string]any{"notice": testNotice})
+			return
+		}
+		if args["handle"] == "taken" {
+			refuse(http.StatusUnprocessableEntity, "validation_failed", "Handle has already been taken",
+				map[string]any{"errors": []any{"Handle has already been taken"}})
+			return
+		}
+		send(http.StatusOK, map[string]any{"ok": true, "status": "code_sent", "signup": testSignup, "email": args["email"],
+			"code_expires_in": 600, "signup_expires_in": 900, "next_step": "Ask the owner."})
+	case args["code"] == "exists":
+		refuse(http.StatusConflict, "account_exists", "This address already has a spun.ink account, so nothing was created.")
+	case args["code"] == "changed":
+		refuse(http.StatusConflict, "terms_changed", "The Terms of Service changed after the code was mailed.",
+			map[string]any{"notice": testNotice})
+	case args["code"] == "done":
+		refuse(http.StatusConflict, "already_completed", "This sign-up already created its account and issued its bearer token, once.")
+	case args["signup"] != testSignup:
+		refuse(http.StatusUnprocessableEntity, "invalid_code", "The code is wrong or no longer valid.")
+	case !fake.proven && normalizeCode(fmt.Sprint(args["code"])) != testCode:
+		refuse(http.StatusUnprocessableEntity, "invalid_code", "The code is wrong or no longer valid.")
+	case args["handle"] == "late":
+		fake.proven = true
+		refuse(http.StatusUnprocessableEntity, "validation_failed", "Handle has already been taken",
+			map[string]any{"errors": []any{"Handle has already been taken"}})
+	default:
+		send(http.StatusCreated, map[string]any{"ok": true, "bearer_token": "good",
+			"site":  map[string]any{"handle": "bakery", "url": "https://bakery.myspun.ink"},
+			"legal": map[string]any{"terms_version": "2026-09-01", "terms_content_hash": "abc123"}})
+	}
 }
 
 func jsonNumber(n int) string { b, _ := json.Marshal(n); return string(b) }
@@ -596,7 +717,7 @@ func TestARejectedTokenPointsToRecover(t *testing.T) {
 
 func TestNoServerNamedListsTheStoredProfiles(t *testing.T) {
 	isolate(t)
-	if _, f := run(t, "", "tools"); !strings.Contains(errorMessage(f), "not logged in — run `spun signup` to open the sign-up page, then `spun login`") {
+	if _, f := run(t, "", "tools"); !strings.Contains(errorMessage(f), "not logged in — run `spun signup` for a new account or `spun login`") {
 		t.Fatalf("empty store: %v", f)
 	}
 	server := fakeServer(t)

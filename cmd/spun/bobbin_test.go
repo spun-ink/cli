@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -76,17 +78,19 @@ func TestBesideKeepsTextTallerThanBobbin(t *testing.T) {
 	}
 }
 
-func TestSignupAtATerminalShowsThePageAndTheLoginStep(t *testing.T) {
-	isolate(t)
-	previous := openBrowser
-	openBrowser = func(string) error { return nil }
-	t.Cleanup(func() { openBrowser = previous })
+func TestSignupAtATerminalShowsEveryNextStep(t *testing.T) {
+	home := isolate(t)
+	server := fakeServer(t)
+	_ = os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
 	var out bytes.Buffer
-	a := &app{stdin: stdinWith(t, ""), stdout: &out, bobbin: true, tty: true}
-	if _, err := a.run([]string{"signup", "--profile", "dev", "--url", "http://spun.localhost:3002"}); err != nil {
+	a := &app{stdin: stdinWith(t, ""), stdout: &out, bobbin: true}
+	if _, f := run(t, "", "signup", "--profile", "dev", "--url", server.URL, "--email", "o@example.com", "--accept-terms"); f != nil {
+		t.Fatal(f)
+	}
+	if _, err := a.run([]string{"signup", "--profile", "dev", "--code", testCode}); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"http://spun.localhost:3002/signup", "spun login --profile dev --url http://spun.localhost:3002"} {
+	for _, want := range []string{`claude "/spun build my site"`, "spun tools"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("view lacks %q: %s", want, out.String())
 		}

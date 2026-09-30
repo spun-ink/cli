@@ -76,4 +76,4 @@ case ":$PATH:" in
   *":$install_dir:"*) ;;
   *) echo "Add $install_dir to your PATH, e.g.: export PATH=\"$install_dir:\$PATH\"" ;;
 esac
-echo "Next: spun signup (opens the sign-up page for a new account), then spun login."
+echo "Next: spun signup (a new account) or spun login (an existing one)."

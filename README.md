@@ -78,23 +78,37 @@ edited in [github.com/spun-ink/plugins](https://github.com/spun-ink/plugins), ne
 
 ## Getting started
 
-1. **A new account** — sign up in the browser:
+1. **A new account** — sign up from the shell:
 
    ```bash
-   spun signup                        # prints https://spun.ink/signup and opens it
-   spun signup --profile dev --url http://spun.localhost:3002   # another server
+   spun signup                        # asks for email, name and site handle
+   spun signup --email you@example.com --name "Rosa's Bakery" --handle rosas-bakery
    ```
 
-   `spun signup` no longer creates an account from the shell and never calls the server. It prints
-   the sign-up page of the selected server (`--url`, profile or spun.ink), opens it in the browser
-   when stdout is a terminal, and prints the matching `spun login` line. Without a terminal — an
-   agent's shell — it prints the same two lines, opens nothing and exits 0: hand your human the
-   address. The old `--email`, `--name`, `--handle`, `--code`, `--accept-terms` and `--no-setup`
-   flags are still accepted and ignored, with one notice line, so no script breaks.
+   It shows the terms sentence spun.ink publishes (with its URLs), then mails a six-digit code to the
+   address; entering the code is your acceptance of those terms, and the mail repeats them. At a
+   terminal `spun signup` asks for the code right there (`482 913` works as well as `482913`). The
+   account is verified the moment the code is accepted, and the site is online: there is no
+   confirmation email to click. The token the server returns is stored, never printed. `signup`
+   refuses when `spun.ink` is already stored — a second sign-up is a second account.
 
-   Once signed up, run `spun login` and paste your token. A `spun` from v0.4 or
-   v0.5 fails at `spun signup`: update it first (`spun upgrade`, or the install script), or sign up
-   at https://spun.ink/signup and run `spun login`. Commands with a stored token keep working.
+   Without a terminal — an agent's shell — `signup` needs `--accept-terms`, passed only once the human
+   has read the terms sentence. It sends the code, prints `{"status":"code_sent","email":…}` on
+   stdout and exits with status **6**. Ask the human for the code from their mail, then finish; the
+   continuation needs no email, and the pending sign-up is bound to the server and profile it
+   started on:
+
+   ```bash
+   spun signup --code 482913
+   spun signup --code 482913 --handle rosas-bakery   # the name or handle was refused: correct it, no new code
+   ```
+
+   A rate limit (`rate_limited`) is retried by repeating the same command later. If the sign-up
+   lapsed (15 minutes) or the code is dead, start over with `spun signup`. A `spun` from before
+   this change cannot finish a sign-up: update it first (`spun upgrade`).
+
+   `spun signup` talks to the server's sign-up route (`/cli/signup`), not to MCP. Against a server
+   without it, `signup` exits 4 `signup_unavailable`: sign up at `/signup`, then run `spun login`.
 
    **An existing account** — log in. The token is read from a no-echo prompt (or stdin), never from
    an argument, so it never lands in shell history. Lost it? https://spun.ink/recover.
@@ -180,6 +194,7 @@ At a terminal output is readable; piped, stdout is JSON. Errors go to stderr as
 | 3 | unauthorized: no token, or the server rejected it |
 | 4 | network or protocol failure, or a failed upgrade (`upgrade_failed`, `upgrade_rolled_back`, `upgrade_broken` — the message says what is installed now) |
 | 5 | no server named, local configuration missing, or this install cannot upgrade itself (`upgrade_required`) |
+| 6 | `spun signup` sent its code and waits for it: not a failure — finish with `spun signup --code <code>` |
 
 ## Uninstall
 
