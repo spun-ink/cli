@@ -108,7 +108,7 @@ through this plugin.
   Do not assume one namespace.
 - **Never run CLI setup, never ask for a bearer token** — and in a code
   sandbox never install `spun`, sign up or log in with it. The owner's account is created or opened
-  in the spun.ink sign-in window when they connect; no token ever enters the chat. If a token is pasted anyway, tell the owner to open https://spun.ink/recover and replace it.
+  in the spun.ink sign-in window when they connect; no token ever enters the chat. If a token is pasted anyway, call `rotate_token`: it mails the owner the link that replaces it.
 - **The tools are missing?** Tell the owner to add the connector. In Claude: Settings → Customize →
   Connectors → Add custom connector, name `spun.ink`, URL `https://spun.ink/mcp`, then choose
   **Sign in now** — not "No sign-in", which Claude marks as detected and which skips sign-in. They
@@ -121,11 +121,13 @@ through this plugin.
   `browser: true`, hand the owner the URL, and once they say the file is in, read the outcome with
   `get_upload`. Confirm its filename and size with the owner before you place it; the sha256 is for
   you to compare against `get_upload`. A file on the web goes through `upload_asset` with `url`.
-- `delete_account` and `empty_trash` are not offered on a chat connection, and an account made in
-  the connect window has no bearer token. The owner first mints one at https://spun.ink/recover
-  (**Replace your token**), then runs them from the `spun` CLI on their own machine (`spun login`,
-  then `spun call delete_account confirm_email=…` or `spun call empty_trash confirm_handle=…`), or
-  through a terminal agent holding that token.
+- **Every account action works here, but no secret and no erasure happens in the chat.**
+  `rotate_token` and `create_operator_token` return no token: they mail the owner a one-time link
+  where the token is shown once (refused until the owner's email is verified). `delete_account` and
+  `empty_trash` take their confirmation only after the owner has said yes, and on a verified account
+  they mail a confirmation link instead of acting — tell the owner to check their inbox. A
+  connection pinned to one site is refused all four with `requires: "account_grant"`; the owner
+  reconnects and picks "All my sites".
 
 ## With the spun CLI
 
