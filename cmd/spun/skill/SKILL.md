@@ -109,10 +109,10 @@ through this plugin.
 - **Never run CLI setup, never ask for a bearer token** — and in a code
   sandbox never install `spun`, sign up or log in with it. The owner's account is created or opened
   in the spun.ink sign-in window when they connect; no token ever enters the chat. If a token is pasted anyway, call `rotate_token`: it mails the owner the link that replaces it.
-- **The tools are missing?** Tell the owner to add the connector. In Claude: Settings → Customize →
-  Connectors → Add custom connector, name `spun.ink`, URL `https://spun.ink/mcp`, then choose
-  **Sign in now** — not "No sign-in", which Claude marks as detected and which skips sign-in. They
-  sign in or sign up in the window that opens.
+- **The tools are missing?** Tell the owner to add the connector. In Claude: open
+  https://claude.ai/directory/spun-ink and click **Connect**, or Settings → Customize → Connectors →
+  Add custom connector, name `spun.ink`, URL `https://spun.ink/mcp`, keep **Sign in now** selected
+  (never "No sign-in", which skips sign-in). They sign in or sign up in the window that opens.
 - **Speak plainly.** In a chat app assume the owner is not a developer: show no Liquid, JSON or tool
   names unless they ask, and show them a preview link, never raw data. In a terminal, match the
   person in front of you.
