@@ -83,11 +83,8 @@ func TestSignupAtATerminalShowsEveryNextStep(t *testing.T) {
 	server := fakeServer(t)
 	_ = os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
 	var out bytes.Buffer
-	a := &app{stdin: stdinWith(t, ""), stdout: &out, bobbin: true}
-	if _, f := run(t, "", "signup", "--profile", "dev", "--url", server.URL, "--email", "o@example.com", "--accept-terms"); f != nil {
-		t.Fatal(f)
-	}
-	if _, err := a.run([]string{"signup", "--profile", "dev", "--code", testCode}); err != nil {
+	a := &app{stdin: stdinWith(t, signUp), stdout: &out, bobbin: true, tty: true}
+	if _, err := a.run([]string{"signup", "--profile", "dev", "--url", server.URL, "--email", "o@example.com"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{`claude "/spun build my site"`, "spun tools"} {
