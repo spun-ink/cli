@@ -78,9 +78,13 @@ func TestSignupAtATerminalRefusesTheRetiredAgentFlags(t *testing.T) {
 	server := newCodeSignup(t)
 	for _, flag := range [][]string{{"--accept-terms"}, {"--code", testCode}} {
 		argv := append([]string{"signup", "--profile", "dev", "--url", server.URL, "--email", "o@example.com"}, flag...)
-		if _, f := runTerminal(t, signUp, argv...); errorCode(f) != "owner_only" {
+		if _, f := runTerminal(t, signUp, argv...); errorCode(f) != "owner_only" || !strings.Contains(errorMessage(f), "are retired") ||
+			strings.Contains(errorMessage(f), "ask them") {
 			t.Errorf("%v: got %v", flag, f)
 		}
+	}
+	if _, f := runTerminal(t, signUp, "signup", "--code", testCode); !strings.Contains(errorMessage(f), "run `spun signup` without them") {
+		t.Errorf("the default profile: got %v", f)
 	}
 	if fake.gets != 0 || signUpCalls != 0 {
 		t.Fatalf("a refused sign-up reached the server: %d gets, %d calls", fake.gets, signUpCalls)

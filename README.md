@@ -185,7 +185,7 @@ At a terminal output is readable; piped, stdout is JSON. Errors go to stderr as
 |---:|---|
 | 0 | ok |
 | 1 | the tool refused — the body says why |
-| 2 | usage: unknown command, malformed argument, unknown tool or invalid params |
+| 2 | usage: unknown command, malformed argument, unknown tool or invalid params; `owner_only` when `spun signup` runs without a terminal |
 | 3 | unauthorized: no token, or the server rejected it |
 | 4 | network or protocol failure, or a failed upgrade (`upgrade_failed`, `upgrade_rolled_back`, `upgrade_broken` — the message says what is installed now) |
 | 5 | no server named, local configuration missing, or this install cannot upgrade itself (`upgrade_required`) |

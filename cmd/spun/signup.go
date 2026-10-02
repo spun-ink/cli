@@ -33,12 +33,16 @@ func (a *app) signupCmd() *cobra.Command {
 		Short: "Create a new spun.ink account at your own terminal and store its token (asks for what is missing)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if !(a.tty || isTerminal(a.stdin)) || cmd.Flags().Changed("accept-terms") || cmd.Flags().Changed("code") {
+			if !(a.tty || isTerminal(a.stdin)) {
 				return fail(exitUsage, "owner_only", ownerOnly)
 			}
 			profile := a.profile
 			if profile == "" {
 				profile = defaultProfile
+			}
+			if cmd.Flags().Changed("accept-terms") || cmd.Flags().Changed("code") {
+				return fail(exitUsage, "owner_only", "--accept-terms and --code are retired — run `spun signup`"+
+					profileFlag(profile)+" without them: it continues an open sign-up and asks for the code")
 			}
 			pending, open := openSignup(profile)
 			if open && server == "" {
