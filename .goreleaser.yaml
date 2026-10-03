@@ -56,9 +56,9 @@ release:
     Then `spun signup` for a new account, or `spun login` for an existing one. Later,
     `spun upgrade` updates an installed release in place.
 
-    `spun signup` now uses the server's sign-up route instead of MCP. v0.4 and v0.5 fail at their
-    next `spun signup` (or when continuing a pending one) once spun.ink drops MCP sign-up: upgrade
-    with `spun upgrade` or the install script. Commands with a stored token keep working.
+    `spun signup` is now the owner's, typed at their own terminal: without one it exits 2
+    (`owner_only`) and sends nothing, and an agent asks the owner to run it. `--accept-terms` and
+    `--code` are gone. At a terminal, an open sign-up resumes at its code prompt.
 
 changelog:
   use: github-native

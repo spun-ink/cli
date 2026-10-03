@@ -78,7 +78,7 @@ edited in [github.com/spun-ink/plugins](https://github.com/spun-ink/plugins), ne
 
 ## Getting started
 
-1. **A new account** — sign up from the shell:
+1. **A new account** — sign up from your own terminal:
 
    ```bash
    spun signup                        # asks for email, name and site handle
@@ -86,26 +86,21 @@ edited in [github.com/spun-ink/plugins](https://github.com/spun-ink/plugins), ne
    ```
 
    It shows the terms sentence spun.ink publishes (with its URLs), then mails a six-digit code to the
-   address; entering the code is your acceptance of those terms, and the mail repeats them. At a
-   terminal `spun signup` asks for the code right there (`482 913` works as well as `482913`). The
-   account is verified the moment the code is accepted, and the site is online: there is no
-   confirmation email to click. The token the server returns is stored, never printed. `signup`
-   refuses when `spun.ink` is already stored — a second sign-up is a second account.
+   address; entering the code is your acceptance of those terms, and the mail repeats them. `spun
+   signup` asks for the code right there (`482 913` works as well as `482913`); a wrong code is asked
+   again, and a refused name or handle is corrected at the prompt without a new code. The account is
+   verified the moment the code is accepted, and the site is online: there is no confirmation email
+   to click. The token the server returns is stored, never printed. `signup` refuses when `spun.ink`
+   is already stored — a second sign-up is a second account.
 
-   Without a terminal — an agent's shell — `signup` needs `--accept-terms`, passed only once the human
-   has read the terms sentence. It sends the code, prints `{"status":"code_sent","email":…}` on
-   stdout and exits with status **6**. Ask the human for the code from their mail, then finish; the
-   continuation needs no email, and the pending sign-up is bound to the server and profile it
-   started on:
+   **Signing up is yours, not your agent's.** Without a terminal — an agent's shell — `signup` sends
+   nothing and exits 2 `owner_only`: the code proves your mailbox and accepts the terms, so you type
+   it at the prompt and never into a chat. On Windows, Git Bash's mintty is not a terminal `spun` can
+   detect: run `winpty spun signup` there, or use Windows Terminal.
 
-   ```bash
-   spun signup --code 482913
-   spun signup --code 482913 --handle rosas-bakery   # the name or handle was refused: correct it, no new code
-   ```
-
-   A rate limit (`rate_limited`) is retried by repeating the same command later. If the sign-up
-   lapsed (15 minutes) or the code is dead, start over with `spun signup`. A `spun` from before
-   this change cannot finish a sign-up: update it first (`spun upgrade`).
+   Closed the terminal before the code arrived? Run `spun signup` again: while the sign-up is open
+   (15 minutes) it asks for the code from that mail and sends no new one; press Enter instead to
+   start over. A rate limit (`rate_limited`) is retried the same way, a little later.
 
    `spun signup` talks to the server's sign-up route (`/cli/signup`), not to MCP. Against a server
    without it, `signup` exits 4 `signup_unavailable`: sign up at `/signup`, then run `spun login`.
@@ -190,11 +185,10 @@ At a terminal output is readable; piped, stdout is JSON. Errors go to stderr as
 |---:|---|
 | 0 | ok |
 | 1 | the tool refused — the body says why |
-| 2 | usage: unknown command, malformed argument, unknown tool or invalid params |
+| 2 | usage: unknown command, malformed argument, unknown tool or invalid params; `owner_only` when `spun signup` runs without a terminal |
 | 3 | unauthorized: no token, or the server rejected it |
 | 4 | network or protocol failure, or a failed upgrade (`upgrade_failed`, `upgrade_rolled_back`, `upgrade_broken` — the message says what is installed now) |
 | 5 | no server named, local configuration missing, or this install cannot upgrade itself (`upgrade_required`) |
-| 6 | `spun signup` sent its code and waits for it: not a failure — finish with `spun signup --code <code>` |
 
 ## Uninstall
 

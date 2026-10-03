@@ -60,8 +60,7 @@ env:    SPUN_PROFILE  profile to use when --profile is not given
         SPUN_NO_UPDATE_CHECK=1  never check for a newer release (` + "`spun upgrade --check`" + ` still does)
 output: human-readable at a terminal, JSON when piped; errors on stderr as {ok:false,error:{code,message}}
 exit:   0 ok · 1 tool refused · 2 usage or unknown tool · 3 unauthorized · 4 network or failed upgrade
-        · 5 config, or this install cannot upgrade itself
-        · 6 signup sent its code and waits: finish with ` + "`spun signup --code <code>`"
+        · 5 config, or this install cannot upgrade itself`
 
 var gettingStarted = []string{
 	"Getting started:",
@@ -86,7 +85,6 @@ type app struct {
 	bobbin  bool // draw the mascot: stdout is a terminal that takes colour
 	result  any
 	ran     bool // a command ran (not --version or --help)
-	exit    int  // status a successful command still ends with (signup waiting for its code)
 	tty     bool // stdin counts as a terminal (tests)
 	quiet   bool // the command leaves no trace: no skill refresh, no update check
 }
