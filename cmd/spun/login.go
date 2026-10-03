@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 
@@ -12,10 +14,10 @@ import (
 
 func (a *app) loginCmd() *cobra.Command {
 	var withToken, noSetup bool
-	var server string
+	var server, email string
 	cmd := &cobra.Command{
-		Use:   "login [--profile <name> --url <server>]",
-		Short: "Store your token for spun.ink (or a named server) and set up your agents",
+		Use:   "login [--email <address>] [--profile <name> --url <server>]",
+		Short: "Sign this machine in to spun.ink (or a named server) with a mailed code, and set up your agents",
 		Args: func(_ *cobra.Command, args []string) error {
 			if len(args) > 0 {
 				return tokenNotAnArgument()
@@ -27,7 +29,12 @@ func (a *app) loginCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			token, err := a.readToken()
+			var token string
+			if (a.tty || isTerminal(a.stdin)) && !withToken {
+				token, err = a.signInByCode(&Client{root, ""}, name, email)
+			} else {
+				token, err = a.readToken()
+			}
 			if err != nil {
 				return err
 			}
@@ -46,8 +53,8 @@ func (a *app) loginCmd() *cobra.Command {
 			return a.reportStored(reply, "Logged in.", nil, nil, noSetup)
 		},
 	}
-	cmd.Flags().BoolVar(&withToken, "token", false, "log in with a pasted account or operator token (the default)")
-	_ = cmd.Flags().MarkHidden("token")
+	cmd.Flags().StringVar(&email, "email", "", "the account owner's address, where the sign-in code goes (asked if blank)")
+	cmd.Flags().BoolVar(&withToken, "token", false, "paste an account or operator token at the prompt instead of signing in with a code")
 	cmd.Flags().StringVar(&server, "url", "", "a dev server's root, e.g. http://spun.localhost:3002 (with --profile)")
 	cmd.Flags().BoolVar(&noSetup, "no-setup", false, "do not install the spun skill for the agents found")
 	// `--token=<value>` is the first guess, and cobra's own parse error would echo the token.
@@ -142,36 +149,53 @@ func loginNext(profile string, noSetup bool, skills []skillRow) []string {
 	}
 	var started []string
 	for _, row := range skills {
-		if start, ok := agentStart[row.Agent]; ok && row.Action != "skipped" {
+		if start, ok := agentStart(row); ok && row.Action != "skipped" {
 			started = append(started, start)
 		}
 	}
 	if len(started) == 0 {
 		next = append(next, "spun setup claude                # or codex: install the spun skill for your agent")
-		started = []string{"ask your agent to work on your site"}
+		started = []string{"ask your agent: " + firstPrompt}
+	} else {
+		next = append(next, "in your project folder:")
 	}
 	next = append(next, started...)
 	return append(next, "or try `spun tools` yourself")
 }
 
-// agentStart opens each agent on the skill setup installed, by its name `spun`. Codex's `$spun` is
-// single-quoted so the shell does not expand it.
-var agentStart = map[string]string{
-	"claude": `claude "/spun build my site"`,
-	"codex":  `codex '$spun build my site'`,
+// firstPrompt is the first message on every way in, in the words of https://spun.ink/start.
+const firstPrompt = "Build my website on spun.ink using what you already know about this project. Ask only for " +
+	"missing essentials. Show me a working draft preview and wait for my approval before publishing."
+
+// agentStart opens the agent on the spun skill with the first prompt: by its name `spun` where setup
+// installed it, as `spun:spun` where the plugin brings it. Codex's `$` is single-quoted so the shell
+// does not expand it.
+func agentStart(row skillRow) (string, bool) {
+	skill := "spun"
+	if row.Action == "plugin" {
+		skill = "spun:spun"
+	}
+	switch row.Agent {
+	case "claude":
+		return `claude "/` + skill + " " + firstPrompt + `"`, true
+	case "codex":
+		return `codex '$` + skill + " " + firstPrompt + `'`, true
+	}
+	return "", false
 }
 
 const loginExample = "spun login"
 
-const tokenSource = "No account yet? `spun signup` creates one and stores its token. A lost token is replaced at https://spun.ink/recover."
+const tokenSource = "The owner signs in with `spun login` at their own terminal, with a code from their mail; " +
+	"`spun signup` creates an account. A script pipes an operator token on stdin. A lost token is replaced at https://spun.ink/recover."
 
 func tokenNotAnArgument() error {
 	return usage("the token is never an argument (it would land in shell history) — run `%s` "+
 		"and paste it at the prompt, or pipe it on stdin", loginExample)
 }
 
-// readToken takes the token from a pipe, or prompts without echo at a terminal. It never prompts
-// without one: an agent's shell has no human to answer.
+// readToken takes the token from a pipe, or prompts without echo at a terminal (`--token`). It never
+// prompts without one: an agent's shell has no human to answer.
 func (a *app) readToken() (string, error) {
 	var token string
 	if isTerminal(a.stdin) {
@@ -191,15 +215,97 @@ func (a *app) readToken() (string, error) {
 	}
 	token = strings.TrimSpace(token)
 	if token == "" {
-		return "", usage("no token on stdin — paste it at the prompt, or pipe it on stdin. %s", tokenSource)
+		return "", usage("no token on stdin — %s", tokenSource)
 	}
 	return token, nil
+}
+
+// signInByCode is `spun login` at a terminal: /cli/login mails the owner a code, and the code typed
+// here returns this machine's own credential. The server answers an address that cannot sign in
+// exactly like one that can, so the prompt says what a missing mail means.
+func (a *app) signInByCode(c *Client, profile, email string) (string, error) {
+	input := bufio.NewReader(a.stdin)
+	for email == "" {
+		var err error
+		if email, err = ask(input, "Email: "); err != nil {
+			return "", usage("not signed in — the input ended")
+		}
+	}
+	again := "spun login" + profileFlag(profile)
+	missing := fail(exitNetwork, "login_unavailable", c.URL+" does not offer sign-in by code — run `"+again+
+		" --token` and paste a token at the prompt")
+	fields, err := c.cliRequest(http.MethodPost, "/cli/login", map[string]any{"email": email}, missing)
+	if err != nil {
+		return "", signInFailure(err, again)
+	}
+	handle, _ := fields["login"].(string)
+	if fields["status"] != "code_sent" || handle == "" {
+		return "", fail(exitNetwork, "bad_response", "/cli/login did not answer with a code_sent status")
+	}
+	fmt.Fprintf(os.Stderr, "If %s has a spun.ink account, a sign-in code is on its way — it is good for %d minutes. "+
+		"If no mail comes, this address has no account that can sign in: `spun signup` creates one.\n",
+		email, numberOr(fields["code_expires_in"], 600)/60)
+
+	args := map[string]any{"login": handle}
+	if machine := machineName(); machine != "" {
+		args["machine"] = machine
+	}
+	for wrong := 0; wrong < maxCodeAttempts; {
+		code, err := ask(input, "Code from the email: ")
+		if err != nil {
+			return "", usage("not signed in — the input ended")
+		}
+		args["code"] = normalizeCode(code)
+		fields, err := c.cliRequest(http.MethodPost, "/cli/login/complete", args, missing)
+		if err == nil {
+			token, _ := fields["bearer_token"].(string)
+			if token == "" {
+				return "", fail(exitNetwork, "bad_response", "/cli/login/complete returned no bearer_token")
+			}
+			return token, nil
+		}
+		if failCode(err) != "invalid_code" {
+			return "", signInFailure(err, again)
+		}
+		wrong++
+		fmt.Fprintln(os.Stderr, "That code did not work — check the newest mail from spun.ink.")
+	}
+	return "", usage("not signed in — five wrong codes end the sign-in: run `%s` again for a new code", again)
+}
+
+// signInFailure words a refused sign-in for the terminal. Nothing a refusal leaves behind can be
+// continued: every way on is a new `spun login`, with a new code.
+func signInFailure(err error, again string) error {
+	if isBusy(err) {
+		code := "rate_limited"
+		if failCode(err) == "unavailable" {
+			code = "unavailable"
+		}
+		return fail(exitNetwork, code, "the server is busy or rate limited — wait a minute, then run `"+again+"` again")
+	}
+	if failCode(err) == "already_completed" {
+		return worded(err, "this sign-in already issued its credential, and a code is never reused — run `"+again+"` again for a new code")
+	}
+	return err
+}
+
+// machineName names this machine's credential in list_connections: the host name, cut to the
+// server's 255 characters. Without one the server names it "spun CLI".
+func machineName() string {
+	name, err := os.Hostname()
+	if err != nil {
+		return ""
+	}
+	if runes := []rune(strings.TrimSpace(name)); len(runes) > 255 {
+		return string(runes[:255])
+	}
+	return strings.TrimSpace(name)
 }
 
 func (a *app) logoutCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "logout [--profile <name>]",
-		Short: "Forget a profile (spun.ink unless named) and its stored token",
+		Short: "Sign this machine out of a profile (spun.ink unless named) and forget its stored credential",
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			name := a.profile
@@ -214,18 +320,50 @@ func (a *app) logoutCmd() *cobra.Command {
 			if !ok {
 				return fail(exitConfig, "config_missing", fmt.Sprintf("no profile named %q", name))
 			}
+			reply := map[string]any{"ok": true, "profile": name, "removed": true}
 			if profile.Credential == "" {
 				forgetUnboundToken(name)
-			} else if err := deleteToken(profile.Credential, profile.Store); err != nil {
-				return err
+				reply["server"], reply["note"] = "local_only", "a login from before server-bound credentials: only the local copy is deleted"
+			} else {
+				token, err := loadToken(profile.Credential, profile.Store)
+				if err != nil {
+					return err
+				}
+				if token != "" {
+					var note string
+					if reply["server"], note = signOut(&Client{profile.URL, token}); note != "" {
+						reply["note"] = note
+					}
+				}
+				if err := deleteToken(profile.Credential, profile.Store); err != nil {
+					return err
+				}
 			}
 			delete(config.Profiles, name)
 			if err := config.save(); err != nil {
 				return err
 			}
-			return a.emit(map[string]any{"ok": true, "profile": name, "removed": true})
+			return a.emit(reply)
 		},
 	}
+}
+
+// signOut revokes the presenting credential on its server. The local copy goes whatever the answer,
+// so this only reports what the server did: "signed_out", or "local_only" with why.
+func signOut(c *Client) (string, string) {
+	missing := fail(exitNetwork, "logout_unavailable", "")
+	_, err := c.cliRequest(http.MethodPost, "/cli/logout", nil, missing)
+	switch {
+	case err == nil, failCode(err) == "unauthenticated":
+		return "signed_out", ""
+	case failCode(err) == "not_a_cli_credential":
+		return "local_only", "this profile held an account or operator token, not a CLI sign-in, so only the local copy is " +
+			"deleted and the token still works — replace an account token at " + c.URL + "/recover, end an operator token with revoke_operator_token"
+	case err == missing:
+		return "local_only", c.URL + " has no sign-out from the terminal, so only the local copy is deleted"
+	}
+	return "local_only", "the server did not confirm the sign-out (" + asFail(err).message() + "), so this machine's " +
+		"sign-in may still be live there — end it with revoke_connection from a connected agent"
 }
 
 func (a *app) profilesCmd() *cobra.Command {

@@ -313,6 +313,9 @@ func (a *app) completeAtTerminal(c *Client, profile string, input *bufio.Reader,
 	proven, wrong := false, 0
 	for attempt := 0; attempt < maxCodeAttempts; attempt++ {
 		args := map[string]any{"signup": p.Signup}
+		if machine := machineName(); machine != "" {
+			args["machine"] = machine
+		}
 		if !proven {
 			if code == "" {
 				var err error

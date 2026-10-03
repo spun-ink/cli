@@ -27,6 +27,7 @@ func fakeServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	toolArgs = map[string]map[string]any{}
 	fake = fakeSteer{}
+	session = sessionSteer{}
 	signUpCalls = 0
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -42,6 +43,10 @@ func fakeServer(t *testing.T) *httptest.Server {
 		}
 		if strings.HasPrefix(r.URL.Path, "/cli/signup") {
 			cliSignup(w, r)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/cli/log") {
+			cliSession(w, r)
 			return
 		}
 		if _, has := r.Header["Authorization"]; !has {
@@ -164,21 +169,9 @@ func cliSignup(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	send := func(status int, payload map[string]any) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(status)
-		enc := json.NewEncoder(w)
-		enc.SetEscapeHTML(false)
-		_ = enc.Encode(payload)
-	}
+	send := func(status int, payload map[string]any) { sendJSON(w, status, payload) }
 	refuse := func(status int, code, message string, extra ...map[string]any) {
-		e := map[string]any{"code": code, "message": message}
-		for _, more := range extra {
-			for k, v := range more {
-				e[k] = v
-			}
-		}
-		send(status, map[string]any{"ok": false, "error": e})
+		refuseJSON(w, status, code, message, extra...)
 	}
 	if r.Method == http.MethodGet {
 		fake.gets++
@@ -237,6 +230,26 @@ func cliSignup(w http.ResponseWriter, r *http.Request) {
 			"site":  map[string]any{"handle": "bakery", "url": "https://bakery.myspun.ink"},
 			"legal": map[string]any{"terms_version": "2026-09-01", "terms_content_hash": "abc123"}})
 	}
+}
+
+// sendJSON answers like the server's /cli routes.
+func sendJSON(w http.ResponseWriter, status int, payload map[string]any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(payload)
+}
+
+// refuseJSON answers with the routes' error envelope.
+func refuseJSON(w http.ResponseWriter, status int, code, message string, extra ...map[string]any) {
+	e := map[string]any{"code": code, "message": message}
+	for _, more := range extra {
+		for k, v := range more {
+			e[k] = v
+		}
+	}
+	sendJSON(w, status, map[string]any{"ok": false, "error": e})
 }
 
 func jsonNumber(n int) string { b, _ := json.Marshal(n); return string(b) }

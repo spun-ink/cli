@@ -2,11 +2,13 @@ package main
 
 import (
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	"github.com/BurntSushi/toml"
 	"github.com/spf13/cobra"
 )
 
@@ -36,6 +38,74 @@ func agentHome(agent string) (string, error) {
 		return filepath.Join(home, ".codex"), nil
 	}
 	return "", usage("unknown agent %q — spun setup claude | codex", agent)
+}
+
+// pluginID is the spun plugin as both agents name it: plugin spun from the marketplace spun-ink.
+const pluginID = "spun@spun-ink"
+
+// pluginServes reports whether the agent has the spun plugin enabled, read where the agent reads it.
+// Claude Code's nearest scope decides: the project folder's local settings, then its shared ones,
+// then the user's. Codex enables plugins in its own config.toml. A served agent has the skill from
+// the plugin, and a second copy from setup would only compete with it.
+func pluginServes(agent string) bool {
+	home, err := agentHome(agent)
+	if err != nil {
+		return false
+	}
+	switch agent {
+	case "claude":
+		for _, path := range []string{filepath.Join(".claude", "settings.local.json"),
+			filepath.Join(".claude", "settings.json"), filepath.Join(home, "settings.json")} {
+			if on, set := claudePlugin(path); set {
+				return on
+			}
+		}
+	case "codex":
+		on, _ := codexPlugin(filepath.Join(home, "config.toml"))
+		return on
+	}
+	return false
+}
+
+func claudePlugin(path string) (on, set bool) {
+	var settings struct {
+		EnabledPlugins map[string]any `json:"enabledPlugins"`
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || json.Unmarshal(data, &settings) != nil {
+		return false, false
+	}
+	on, set = settings.EnabledPlugins[pluginID].(bool)
+	return on, set
+}
+
+func codexPlugin(path string) (on, set bool) {
+	var config struct {
+		Plugins map[string]struct {
+			Enabled *bool `toml:"enabled"`
+		} `toml:"plugins"`
+	}
+	if _, err := toml.DecodeFile(path, &config); err != nil {
+		return false, false
+	}
+	plugin, ok := config.Plugins[pluginID]
+	if !ok || plugin.Enabled == nil {
+		return false, false
+	}
+	return *plugin.Enabled, true
+}
+
+// servedByPlugin leaves the skill to the plugin and takes back a copy setup wrote earlier.
+func servedByPlugin(agent, path string) (action, note string) {
+	note = "the spun plugin is enabled for " + agent + " and brings the skill"
+	removed, _, err := installSkill(path, true)
+	switch {
+	case err != nil:
+		note += "; " + asFail(err).message()
+	case removed == "removed":
+		note += "; the copy spun setup wrote earlier is removed"
+	}
+	return "plugin", note
 }
 
 func skillDir(agent string) (string, error) {
@@ -82,7 +152,9 @@ func setupAll(remove bool) []skillRow {
 			continue
 		}
 		row := skillRow{Agent: agent, Path: path}
-		if row.Action, row.Note, err = installSkill(path, remove); err != nil {
+		if !remove && pluginServes(agent) {
+			row.Action, row.Note = servedByPlugin(agent, path)
+		} else if row.Action, row.Note, err = installSkill(path, remove); err != nil {
 			row.Action, row.Note = "skipped", asFail(err).message()
 		}
 		rows = append(rows, row)
@@ -113,10 +185,16 @@ func (a *app) setupCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if dir != "" {
+			var action, note string
+			switch {
+			case dir != "":
+				action, note, err = installSkill(dir, remove)
 				path = dir
+			case !remove && pluginServes(args[0]):
+				action, note = servedByPlugin(args[0], path)
+			default:
+				action, note, err = installSkill(path, remove)
 			}
-			action, note, err := installSkill(path, remove)
 			if err != nil {
 				return err
 			}

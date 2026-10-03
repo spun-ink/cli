@@ -91,7 +91,8 @@ func (c *Client) rpc(method string, params any) (map[string]any, error) {
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
 		return nil, fail(exitUnauthorized, "unauthorized",
-			"the server rejected the token — a lost or rotated one is replaced at "+c.URL+"/recover")
+			"the server rejected the stored credential — `spun login` signs this machine in again; a lost or "+
+				"rotated token is replaced at "+c.URL+"/recover")
 	}
 
 	var reply map[string]any
@@ -125,10 +126,16 @@ func rpcErrorExit(rpcErr any) int {
 	return exitNetwork
 }
 
-// signupRequest is one call to the server's plain-JSON sign-up route, which needs no token. A
-// refusal ({"ok": false, "error": {...}}) is a *Fail shaped like a tool's, so the sign-up code reads
-// both alike; a server without the route answers 404.
+// signupRequest is one call to the server's plain-JSON sign-up route, which needs no token.
 func (c *Client) signupRequest(method, path string, body map[string]any) (map[string]any, error) {
+	return c.cliRequest(method, path, body, fail(exitNetwork, "signup_unavailable", c.URL+
+		" does not offer sign-up from the terminal — sign up at "+c.URL+"/signup, then run `spun login`"))
+}
+
+// cliRequest is one call to a plain-JSON /cli route, outside /mcp. A refusal ({"ok": false,
+// "error": {...}}) is a *Fail shaped like a tool's, so the caller reads both alike; a server
+// without the route answers 404, and missing is the error that says so.
+func (c *Client) cliRequest(method, path string, body map[string]any, missing *Fail) (map[string]any, error) {
 	var payload []byte
 	contentType := ""
 	if body != nil {
@@ -139,8 +146,7 @@ func (c *Client) signupRequest(method, path string, body map[string]any) (map[st
 		return nil, err
 	}
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, fail(exitNetwork, "signup_unavailable", c.URL+" does not offer sign-up from the terminal — sign up at "+
-			c.URL+"/signup, then run `spun login`")
+		return nil, missing
 	}
 	var reply map[string]any
 	structured := json.Unmarshal(text, &reply) == nil
