@@ -60,5 +60,10 @@ release:
     (`owner_only`) and sends nothing, and an agent asks the owner to run it. `--accept-terms` and
     `--code` are gone. At a terminal, an open sign-up resumes at its code prompt.
 
+    `spun login` at a terminal signs this machine in with a code mailed to the owner and stores its
+    own credential; a token piped on stdin still works, and `--token` pastes one. `spun logout` now
+    ends the sign-in on the server too. Where the spun plugin is enabled, setup leaves the skill to
+    the plugin. The skill comes from spun-ink/plugins v0.4.6.
+
 changelog:
   use: github-native
