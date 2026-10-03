@@ -87,7 +87,7 @@ func TestSignupAtATerminalShowsEveryNextStep(t *testing.T) {
 	if _, err := a.run([]string{"signup", "--profile", "dev", "--url", server.URL, "--email", "o@example.com"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`claude "/spun build my site"`, "spun tools"} {
+	for _, want := range []string{`claude "/spun Build my website on spun.ink`, "spun tools"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("view lacks %q: %s", want, out.String())
 		}

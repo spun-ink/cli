@@ -90,8 +90,8 @@ edited in [github.com/spun-ink/plugins](https://github.com/spun-ink/plugins), ne
    signup` asks for the code right there (`482 913` works as well as `482913`); a wrong code is asked
    again, and a refused name or handle is corrected at the prompt without a new code. The account is
    verified the moment the code is accepted, and the site is online: there is no confirmation email
-   to click. The token the server returns is stored, never printed. `signup` refuses when `spun.ink`
-   is already stored — a second sign-up is a second account.
+   to click. The server returns this machine's own sign-in, which is stored, never printed. `signup`
+   refuses when `spun.ink` is already stored — a second sign-up is a second account.
 
    **Signing up is yours, not your agent's.** Without a terminal — an agent's shell — `signup` sends
    nothing and exits 2 `owner_only`: the code proves your mailbox and accepts the terms, so you type
@@ -105,26 +105,41 @@ edited in [github.com/spun-ink/plugins](https://github.com/spun-ink/plugins), ne
    `spun signup` talks to the server's sign-up route (`/cli/signup`), not to MCP. Against a server
    without it, `signup` exits 4 `signup_unavailable`: sign up at `/signup`, then run `spun login`.
 
-   **An existing account** — log in. The token is read from a no-echo prompt (or stdin), never from
-   an argument, so it never lands in shell history. Lost it? https://spun.ink/recover.
+   **An existing account** — sign this machine in. `spun login` asks for your email, mails a
+   six-digit code and asks for it at the prompt; no mail means the address has no account that can
+   sign in. Each machine gets its own sign-in, listed by its host name in `list_connections`; `spun
+   logout` ends it on the server and deletes the local copy, and `revoke_connection` ends it from
+   anywhere.
 
    ```bash
    spun login
+   spun login --email you@example.com
    ```
 
-   Either way the token goes to the OS credential store (macOS Keychain, Windows Credential Manager, the Linux
+   A script or CI pipes a token on stdin instead (`spun login < token-file`), and `spun login
+   --token` asks for a pasted one at a terminal. A token is never an argument, so it never lands in
+   shell history. `spun logout` of a stored token only deletes the local copy: the token still
+   works until you replace it at https://spun.ink/recover or end it with `revoke_operator_token`.
+
+   Either way the sign-in goes to the OS credential store (macOS Keychain, Windows Credential Manager, the Linux
    Secret Service). A Linux or macOS machine without one falls back to an owner-only file
-   (`0600`) in `~/.config/spun/`; on Windows there is no fallback — a token is never kept in a
+   (`0600`) in `~/.config/spun/`; on Windows there is no fallback — a credential is never kept in a
    plain file there.
 
    Both also install the `spun` skill for every agent it finds (`~/.claude`, `~/.codex` or
    `$CODEX_HOME`). `--no-setup` skips that; `spun setup` reruns it, `spun setup --remove` undoes it.
+   An agent with the spun plugin enabled already has the skill: setup leaves it to the plugin and
+   removes a copy it wrote earlier. For Claude Code it reads `enabledPlugins` in the project
+   folder's `.claude/settings.local.json` and `.claude/settings.json`, then `~/.claude/settings.json`;
+   for Codex, `[plugins."spun@spun-ink"]` in its `config.toml`.
 
-2. Start your agent on the skill — `/spun` in Claude Code, `$spun` in Codex:
+2. From your project folder, start your agent on the skill with the first prompt — `/spun` in
+   Claude Code and `$spun` in Codex, or `/spun:spun` and `$spun:spun` where the plugin brings it.
+   `login` and `signup` print the line that fits this machine:
 
    ```bash
-   claude "/spun build my site"
-   codex '$spun build my site'        # single quotes, or the shell expands $spun
+   claude "/spun Build my website on spun.ink using what you already know about this project. Ask only for missing essentials. Show me a working draft preview and wait for my approval before publishing."
+   codex '$spun Build my website on spun.ink …'    # single quotes, or the shell expands $spun
    ```
 
    Depending on its permission mode, your agent may ask before a `spun` command. To let Claude Code run `spun` without
@@ -155,13 +170,13 @@ spun --profile dev tools              # or: export SPUN_PROFILE=dev
 
 - The profile name `spun.ink` only ever means https://spun.ink, so another URL can never become the
   default.
-- A stored token is bound to the server it was stored for. Moving a profile to another server
+- A stored credential is bound to the server it was stored for. Moving a profile to another server
   stores a new credential; `SPUN_URL` can never send a profile's token elsewhere.
 - `SPUN_URL` with `SPUN_TOKEN` works without a profile; `SPUN_TOKEN` alone goes to spun.ink.
 - Plain `http://` is accepted for `localhost` only.
 
-`spun profiles` lists what is stored (never a token); `spun logout` forgets `spun.ink`,
-`spun logout --profile <name>` another.
+`spun profiles` lists what is stored (never a credential); `spun logout` signs out of `spun.ink`,
+`spun logout --profile <name>` out of another.
 
 ## Arguments
 
@@ -197,8 +212,8 @@ Run these in order — the first two need `spun` itself:
 1. `spun setup --remove` — removes the skill from every agent it was installed for. A skill
    installed with `--dir` goes with `spun setup <agent> --dir <path> --remove`.
 2. `spun logout`, and `spun logout --profile <name>` for every other profile `spun profiles`
-   lists. This deletes the token from the OS credential store, which deleting files would leave
-   behind.
+   lists. This ends each sign-in on its server and deletes it from the OS credential store, which
+   deleting files would leave behind.
 3. Delete the binary and spun's configuration.
 
    **macOS / Linux**

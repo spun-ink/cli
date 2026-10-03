@@ -3,6 +3,7 @@ module github.com/spun-ink/cli
 go 1.27.1
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/spf13/cobra v1.10.2
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/mod v0.41.0
